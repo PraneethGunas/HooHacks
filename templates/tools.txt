@@ -1,0 +1,298 @@
+# PolicyPulse V1 — Tool Definitions
+
+## Tool 1: fred_search
+
+**Name:** `fred_search`  
+**Phase(s):** 2 (Baseline & Counterfactual)  
+**External API:** FRED API — `https://api.stlouisfed.org/fred/series/search`  
+**Auth:** API key (free)  
+
+**Description:**  
+Search the Federal Reserve Economic Data (FRED) database to discover relevant economic data series by keyword. Use this when you don't know the exact series ID for the data you need. Returns matching series with their IDs, titles, units, frequency, and popularity ranking. Always call this BEFORE fred_get_series when you're unsure which series exists for a given economic indicator.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | — | Natural language description of the economic data you need. Be specific: "virginia unemployment rate" works better than "unemployment". Other examples: "consumer price index food", "median household income virginia", "total nonfarm employment virginia". |
+| `limit` | integer | No | 5 | Maximum number of series to return (1-50). Use 5 for exploratory searches, increase to 10-15 if the first results aren't relevant. |
+
+**Returns:** JSON array of matching series, each containing:
+- `id`: FRED series identifier (e.g., "STTMINWGVA") — use this with fred_get_series
+- `title`: Human-readable series name
+- `units`: Unit of measurement (e.g., "Dollars per Hour", "Percent")
+- `frequency`: Data frequency ("Monthly", "Quarterly", "Annual")
+- `seasonal_adjustment`: Whether data is seasonally adjusted ("SA", "NSA")
+- `last_updated`: When the series was last updated
+- `popularity`: FRED popularity score (higher = more commonly used)
+
+**Common series you may discover:**
+- State minimum wages: search "minimum wage [state]"
+- State employment: search "employment [state]"
+- Industry employment: search "food service employment", "retail employment"
+- Price indices: search "consumer price index [category]"
+- Income data: search "median income [state]", "per capita income [state]"
+
+---
+
+## Tool 2: fred_get_series
+
+**Name:** `fred_get_series`  
+**Phase(s):** 1 (Specification), 2 (Baseline & Counterfactual)  
+**External API:** FRED API — `https://api.stlouisfed.org/fred/series` + `/fred/series/observations`  
+**Auth:** API key (free, same key as fred_search)  
+
+**Description:**  
+Fetch actual numerical time series data for a known FRED series. Use AFTER fred_search has identified the correct series ID, or when you already know the series ID from common patterns. Returns the most recent 12 data points along with metadata about the series. This is how you get concrete numbers — current minimum wage levels, unemployment rates, CPI values, employment counts, GDP figures, etc.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `series_id` | string | Yes | — | FRED series identifier. Get this from fred_search results, or use known patterns: `STTMINWG[STATE_ABBREV]` for state minimum wage, `UNRATE` for national unemployment, `CPIAUCSL` for CPI, `MEHOINUSA672N` for median household income. |
+| `start_date` | string | No | "2019-01-01" | Start date in YYYY-MM-DD format. Default captures pre-COVID baseline through present. Set earlier (e.g., "2015-01-01") for longer trend analysis, or later for focused recent data. |
+
+**Returns:** JSON object containing:
+- `series_id`: The requested series ID
+- `title`: Full series name
+- `units`: Unit of measurement
+- `frequency`: Data frequency
+- `latest_value`: Most recent data point value
+- `latest_date`: Date of the most recent data point
+- `recent_observations`: Array of last 12 data points, each with `date` and `value`
+- `total_observations`: Total number of observations in the requested range
+
+**Well-known series IDs:**
+- `FEDMINNFRWG` — Federal minimum wage
+- `STTMINWGVA` — Virginia state minimum wage
+- `UNRATE` — National unemployment rate
+- `CPIAUCSL` — Consumer Price Index (all urban consumers)
+- `GDP` — Gross Domestic Product
+- `MEHOINUSA672N` — Median household income (US)
+- `A939RX0Q048SBEA` — Real GDP per capita
+- `PAYEMS` — Total nonfarm payrolls (national)
+
+---
+
+## Tool 3: bls_get_data
+
+**Name:** `bls_get_data`  
+**Phase(s):** 2 (Baseline & Counterfactual)  
+**External API:** BLS Public Data API v2 — `https://api.bls.gov/publicAPI/v2/timeseries/data/`  
+**Auth:** Registration key (free, increases rate limits from 25 to 500 queries/day)  
+
+**Description:**  
+Fetch detailed employment, wage, and price data from the Bureau of Labor Statistics. BLS provides more granular breakdowns than FRED — industry-specific employment, state-level labor force data, occupational wages, and detailed price indices. Use this when you need data sliced by industry, state, or occupation that FRED doesn't carry at that granularity. You can request up to 50 series in a single call.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `series_ids` | array of strings | Yes | — | List of BLS series identifiers, max 50. Series IDs follow specific patterns depending on the data program (see patterns below). |
+| `start_year` | string | No | "2020" | Four-digit start year (e.g., "2019"). BLS API allows up to 20 years of data with a registration key, 10 years without. |
+
+**Returns:** JSON array, one entry per requested series, each containing:
+- `series_id`: The BLS series identifier
+- `data`: Array of up to 20 recent observations, each with:
+  - `year`: Four-digit year
+  - `period`: Month code ("M01" through "M12") or "M13" for annual average
+  - `value`: Data value as string
+  - `pct_change`: Percentage change from 1 period ago (if calculations enabled)
+
+**BLS Series ID Patterns:**
+
+*Current Employment Statistics (CES) — Industry Employment:*
+- Pattern: `CEU[industry_code][data_type]`
+- `CEU0000000001` — Total nonfarm employment (national)
+- `CEU7000000001` — Leisure & hospitality employment
+- `CEU4142000001` — Retail trade employment
+- `CEU6500000001` — Education & health services employment
+- `CEU3000000001` — Manufacturing employment
+- Data types: `01` = employment, `03` = avg hourly earnings, `11` = avg weekly earnings
+
+*Local Area Unemployment Statistics (LAUS) — State/County Labor:*
+- Pattern: `LAUST[FIPS_code]0000000000[measure]`
+- `LAUST510000000000003` — Virginia unemployment rate (FIPS 51 = VA)
+- `LAUST510000000000005` — Virginia employment level
+- `LAUST510000000000006` — Virginia labor force
+- Measures: `03` = unemployment rate, `04` = unemployment level, `05` = employment, `06` = labor force
+
+*Consumer Price Index (CPI):*
+- `CUUR0000SA0` — CPI all items, all urban consumers, not seasonally adjusted
+- `CUUR0000SAF1` — CPI food
+- `CUUR0000SEHA` — CPI rent of primary residence
+- `CUSR0000SA0` — CPI all items, seasonally adjusted
+
+---
+
+## Tool 4: search_academic_papers
+
+**Name:** `search_academic_papers`  
+**Phase(s):** 3 (Evidence Gathering)  
+**External API:** Semantic Scholar Academic Graph API — `https://api.semanticscholar.org/graph/v1/paper/search`  
+**Auth:** Optional API key (free, higher rate limit)  
+
+**Description:**  
+Search the Semantic Scholar academic database for peer-reviewed economics research relevant to the policy being analyzed. Returns structured metadata including titles, abstracts, auto-generated TLDRs, citation counts, and author lists. Use this to find empirical evidence on the policy's transmission channels — employment elasticities, price pass-through rates, distributional effects, behavioral responses, etc. Prioritize highly-cited papers and meta-analyses. Always cross-reference results with search_openalex, as the two databases have different coverage.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | — | Research topic to search for. Use specific economic terminology for best results: "minimum wage employment elasticity" not "what happens to jobs when minimum wage goes up". Other examples: "minimum wage price pass-through restaurants", "monopsony labor market minimum wage", "minimum wage hours reduction part-time". |
+| `year_range` | string | No | "2015-2026" | Filter by publication year. Format: "YYYY-YYYY". Use "2015-2026" for recent evidence, broaden to "2000-2026" for seminal papers, narrow to "2022-2026" for cutting-edge research. |
+| `limit` | integer | No | 5 | Number of papers to return (1-10). Start with 5, increase if results are thin or you need broader coverage. |
+
+**Returns:** JSON array of papers, each containing:
+- `title`: Paper title
+- `year`: Publication year
+- `citations`: Total citation count (higher = more influential, but newer papers will have fewer)
+- `tldr`: Auto-generated one-sentence summary (very useful for quick assessment)
+- `abstract`: First 500 characters of the abstract
+- `authors`: First 3 author names
+- `url`: Semantic Scholar URL for the paper
+- `type`: Publication type (e.g., "JournalArticle", "Conference")
+
+**Search strategy tips:**
+- Start specific: "minimum wage employment elasticity meta-analysis"
+- If thin results, broaden: "minimum wage labor market effects"
+- For contested topics, search both sides: "minimum wage employment reduction" AND "minimum wage monopsony positive employment"
+- High citation count + recent year = likely a landmark study
+- TLDR field is reliable for quick relevance assessment
+
+---
+
+## Tool 5: search_openalex
+
+**Name:** `search_openalex`  
+**Phase(s):** 3 (Evidence Gathering)  
+**External API:** OpenAlex API — `https://api.openalex.org/works`  
+**Auth:** None required (include email in `mailto` param for higher rate limit)  
+
+**Description:**  
+Search the OpenAlex academic database for research on economic policy topics. OpenAlex indexes 250M+ works and has better coverage than Semantic Scholar for: NBER working papers, Federal Reserve research papers, World Bank policy reports, and institutional publications. Use as a complement to search_academic_papers — always search both for thorough evidence gathering. Particularly valuable for finding pre-publication working papers that contain the most recent findings.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | — | Search query. Behaves similarly to search_academic_papers but often returns different results due to broader index. Same query formulation advice applies. |
+| `sort_by` | string | No | "cited_by_count" | Sort results by `cited_by_count` (most influential first) or `publication_date` (newest first). Use cited_by_count for established evidence, publication_date for cutting-edge research. |
+| `limit` | integer | No | 5 | Number of results (1-10). |
+
+**Returns:** JSON array of works, each containing:
+- `title`: Work title
+- `year`: Publication year
+- `citations`: Citation count
+- `abstract`: Reconstructed abstract text (first 500 chars). Note: OpenAlex stores abstracts as inverted indices; the tool reconstructs readable text.
+- `doi`: Digital Object Identifier (if available)
+- `open_access_url`: Direct URL to free full text (if available — very useful for fetch_document_text follow-up)
+- `authors`: First 3 author names
+
+**Key advantage:** The `open_access_url` field often provides a direct link to a free PDF or HTML version of the paper, which you can then read with fetch_document_text. Semantic Scholar doesn't always have this.
+
+---
+
+## Tool 6: search_cbo_reports
+
+**Name:** `search_cbo_reports`  
+**Phase(s):** 3 (Evidence Gathering)  
+**External API:** Tavily Search API (scoped to cbo.gov) — `https://api.tavily.com/search`  
+**Auth:** Tavily API key (free tier: 1,000 calls/month)  
+
+**Description:**  
+Search the Congressional Budget Office website for official policy analysis reports. CBO produces the most authoritative nonpartisan policy impact analyses in the US federal context — cost estimates for proposed legislation, employment projections, distributional analyses, and long-term budget impact scoring. CBO reports carry significant weight because they use established scoring methodology and are the official reference for congressional decision-making. Use this whenever the policy has a federal angle or when CBO has scored a similar policy at the federal level.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | — | Policy topic to search for on cbo.gov. Be specific about the policy mechanism: "federal minimum wage employment effects" rather than "minimum wage". Other examples: "Raise the Wage Act cost estimate", "minimum wage distributional analysis", "minimum wage family income poverty". |
+| `limit` | integer | No | 5 | Number of results (1-10). CBO has fewer but higher-quality results than academic search, so 3-5 is usually sufficient. |
+
+**Returns:** JSON array of reports, each containing:
+- `title`: Report title (CBO titles are very descriptive, e.g., "The Effects on Employment and Family Income of Increasing the Federal Minimum Wage")
+- `url`: Direct URL to the CBO report page (can be followed up with fetch_document_text)
+- `snippet`: First 400 characters of relevant content from the page
+- `score`: Relevance score from search engine
+
+**Important context:** CBO scores FEDERAL policy, not state policy. For a Virginia minimum wage analysis, CBO reports on federal minimum wage proposals are still valuable because they establish the analytical framework and national-level effect estimates — but you must note the applicability gap (federal ≠ state, national ≠ Virginia-specific).
+
+---
+
+## Tool 7: web_search_news
+
+**Name:** `web_search_news`  
+**Phase(s):** 1 (Policy Specification), 3 (Evidence Gathering)  
+**External API:** Tavily Search API — `https://api.tavily.com/search`  
+**Auth:** Tavily API key (same key as search_cbo_reports)  
+
+**Description:**  
+Search the web for recent news, current policy proposals, and real-world outcomes of similar policies. This tool fills the gap between historical data (FRED/BLS) and academic research (papers) — it tells you what is happening RIGHT NOW. Use in Phase 1 to find the actual policy proposal, its current legislative status, and political context. Use in Phase 3 to find real-world outcomes from analogous policy implementations (e.g., what happened after California raised fast food minimum wage to $20).
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | Yes | — | Search query focused on recent developments. Include specific policy details and location: "Virginia $20 minimum wage bill 2026" for finding the actual proposal, "California $20 minimum wage results employment" for analogous outcomes. |
+| `recency` | string | No | "past_month" | Time filter for results. Options: `past_week` (7 days), `past_month` (30 days), `past_year` (365 days). Use past_week for breaking developments, past_month for current context, past_year for implementation outcomes. |
+
+**Returns:** JSON array of articles, each containing:
+- `title`: Article headline
+- `url`: Direct URL (can follow up with fetch_document_text for full content)
+- `content`: First 300 characters of article content
+- `published_date`: Publication date (or "unknown")
+
+**When to use which recency:**
+- Phase 1 (finding the proposal): `past_month` or `past_year`
+- Phase 3 (recent outcomes of similar policies): `past_year`
+- Phase 3 (very recent data releases or breaking policy news): `past_week`
+
+**NOT for:** Historical economic data (use FRED/BLS) or academic research (use search_academic_papers/search_openalex).
+
+---
+
+## Tool 8: fetch_document_text
+
+**Name:** `fetch_document_text`  
+**Phase(s):** 1 (Policy Specification), 4 (Deep Reading)  
+**External API:** Direct HTTP GET (no third-party API)  
+**Auth:** None  
+
+**Description:**  
+Fetch and extract readable text content from a URL — either an HTML web page or a PDF document. This is the "read the actual document" tool. Use it AFTER a search tool (search_cbo_reports, search_academic_papers, search_openalex, web_search_news) finds a relevant document that you need to read in full. Search tools return titles and snippets; this tool returns the actual content. Essential for reading CBO report details, open-access paper findings, bill text, and in-depth news analyses where the snippet was insufficient.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `url` | string | Yes | — | Full URL of the document to fetch. Get this from the `url` field of search results or the `open_access_url` field from search_openalex. Must be a publicly accessible URL (no paywalled content). |
+| `max_chars` | integer | No | 4000 | Maximum characters to return. The tool truncates intelligently, keeping the beginning of the document (which usually contains key findings and executive summary). Increase to 8000-10000 for long CBO reports where findings are spread throughout. Decrease to 2000 for quick checks. |
+
+**Returns:** Plain text string containing:
+- Extracted text content from the document
+- "[...truncated...]" marker if content exceeded max_chars
+
+**Content extraction behavior:**
+- **HTML pages:** Strips navigation, footer, sidebar, scripts, and styles. Returns clean body text.
+- **PDF documents:** Extracts text from all pages using pdfplumber. Returns concatenated page text.
+
+**Usage tips:**
+- CBO reports: Use max_chars=8000, key numbers are often in tables mid-document
+- Academic papers (open access): Use max_chars=6000, abstract + introduction + results sections
+- News articles: Default 4000 is usually sufficient
+- Bill text: Use max_chars=10000 for full legislative text with exemptions and definitions
+- If the URL returns garbage or an error, the document may be paywalled or require JavaScript rendering — note this and move on
+
+---
+
+## API Keys Summary
+
+| # | Service | Env Variable | Registration URL | Cost |
+|---|---------|-------------|-----------------|------|
+| 1 | Google Gemini | `GEMINI_API_KEY` | ai.google.dev | Pay-per-use |
+| 2 | FRED | `FRED_API_KEY` | fred.stlouisfed.org/docs/api/api_key.html | Free |
+| 3 | BLS | `BLS_API_KEY` | data.bls.gov/registrationEngine/ | Free |
+| 4 | Semantic Scholar | `SEMANTIC_SCHOLAR_KEY` | semanticscholar.org/product/api | Free |
+| 5 | Tavily | `TAVILY_API_KEY` | tavily.com | Free tier (1000/mo) |
+| — | OpenAlex | No key needed | Set `mailto` param to your email | Free |
