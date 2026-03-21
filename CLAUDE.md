@@ -210,6 +210,8 @@ None — works purely on agent outputs.
 
 ## Lightning / L402 Premium Data Layer
 
+**✅ Lightning stack is fully operational on regtest.** L402 end-to-end flow confirmed working.
+
 The L402 protocol enables AI agents to autonomously pay for premium data using Bitcoin Lightning micropayments. When free government APIs (FRED, BLS, etc.) provide baseline data, the Premium Data Agent can access gated sources — paid legal databases, proprietary economic models, premium research — by paying fractions of a cent per request.
 
 **This is a core differentiator for the SZNS Solutions and Sixgen/CCI sponsor tracks.** It demonstrates real cryptographic auth (macaroons + invoice verification) and autonomous agent payments.
@@ -221,16 +223,15 @@ Agent needs premium data
        │
        ▼
 ┌──────────────────┐
-│  HTTP GET         │  Request premium endpoint
-│  premium-api.com  │
+│  HTTP GET         │  Request premium endpoint via Aperture
+│  aperture:8081    │
 └──────┬───────────┘
        │  HTTP 402 Payment Required
        │  WWW-Authenticate: L402 macaroon="...", invoice="lnbc..."
        ▼
 ┌──────────────────┐
-│  LND Node         │  Pay Lightning invoice (testnet/regtest)
-│  (via lnget or    │  Amount: 10-100 sats
-│   gRPC bindings)  │
+│  lnget (auto)     │  Pay Lightning invoice from buyer wallet
+│  litd-buyer node  │  Amount: 10-25 sats
 └──────┬───────────┘
        │  Payment preimage returned
        ▼
@@ -243,14 +244,43 @@ Agent needs premium data
   Agent continues with enriched data
 ```
 
-### Architecture
+### Lightning Architecture
+
+```
+bitcoind (regtest) → litd-buyer (agent wallet, Lightning Terminal)
+                   → litd-seller (Aperture's node, Lightning Terminal)
+                                    ↓
+                               aperture (L402 proxy, port 8081)
+                                    ↓
+                               premium-data (FastAPI, port 8082)
+```
+
+We use **lightning-agent-tools** from Lightning Labs end-to-end. No custom Lightning code.
 
 | Component | Tool / Service | Role |
 |-----------|---------------|------|
-| **LND** | `lightninglabs/lnd` (Docker, regtest) | Lightning node — wallet, invoice payment |
-| **Aperture** | `lightninglabs/aperture` | L402 reverse proxy — gates premium endpoints behind invoices, mints/verifies macaroons |
-| **lnget** | `lightning-agent-tools` | HTTP client that auto-handles L402 (detect 402 → pay → cache token → retry) |
-| **Mock Premium Services** | FastAPI endpoints behind Aperture | 2-3 services: legal analysis DB, economic model API, premium research corpus |
+| **litd** | `lightninglabs/lightning-terminal:v0.15.0-alpha` | Lightning Terminal — lnd + loop + pool + tapd bundled. Two nodes: buyer (agent wallet) and seller (Aperture's node) |
+| **Aperture** | Built from source (arm64) | L402 reverse proxy — gates premium endpoints behind invoices, mints/verifies macaroons |
+| **lnget** | Built from source in backend container | L402 client — auto-handles 402 detection, invoice payment, token caching, spending limits |
+| **bitcoind** | `lncm/bitcoind:v27.0` | Regtest Bitcoin node — mine own blocks, zero external dependencies |
+
+### Lightning Key Files
+
+| File | Purpose |
+|------|---------|
+| `docker/docker-compose.lightning.yml` | Full Lightning stack compose file |
+| `docker/litd/buyer-lit.conf` | litd config for buyer (regtest, bitcoind backend) |
+| `docker/litd/seller-lit.conf` | litd config for seller (regtest, bitcoind backend) |
+| `docker/Dockerfile.aperture` | Builds Aperture from source via `git clone` + `go build` (arm64) |
+| `docker/Dockerfile.bootstrap` | Bootstrap image: lncm/bitcoind + lncli from litd image + jq |
+| `docker/Dockerfile.backend` | Backend: Python + Go + lnget (cloned & built from source) |
+| `docker/Dockerfile.premium-data` | Lightweight FastAPI container for mock premium endpoints |
+| `docker/aperture/aperture.yaml` | Aperture L402 proxy config — routes to premium-data, prices in sats |
+| `scripts/bootstrap-regtest.sh` | One-shot: funds wallet, opens channel, bakes macaroons, generates lnget config |
+| `backend/lightning/l402_client.py` | Python wrapper around `lnget` subprocess calls |
+| `backend/lightning/premium_agent.py` | Premium Data Agent — orchestrates L402 fetches, emits SSE events |
+| `backend/lightning/mock_services/premium_data.py` | 3 mock premium endpoints with curated data for 3 demo scenarios |
+| `scripts/test_l402_flow.py` | End-to-end test suite for the L402 flow |
 
 ### Mock Premium Data Services
 
@@ -264,7 +294,7 @@ These are real FastAPI services behind Aperture — the data is curated/pre-load
 
 ### Integration with Agent Pipeline
 
-The Premium Data Agent sits between Stage 1 (Analyst) and Stage 2 (Sector Agents). After the Analyst produces a briefing packet from free sources, the Premium Agent evaluates whether premium data would strengthen the analysis, triggers L402 payments, and enriches the briefing packet before it's distributed to sector agents.
+The Premium Data Agent sits between Stage 1 (Analyst) and Stage 2 (Sector Agents):
 
 ```
 Stage 1: Analyst (free APIs: FRED, BLS, etc.)
@@ -294,28 +324,82 @@ The frontend shows Lightning payments happening in real time:
 }
 ```
 
-### Setup (Regtest — Self-Contained)
+### Lightning Common Issues & Fixes
+
+**arm64 / Apple Silicon:**
+- `lightninglabs/lightning-terminal:v0.15.0-alpha` pulls fine on arm64
+- `lncm/bitcoind:v27.0` has confirmed arm64 support
+- **DO NOT use `lncm/lnd`** — tops out at v0.13.4, way too old. Use litd image for lncli instead
+- Both Aperture and lnget are cloned and built from source (`git clone` + `go build`) — both have `replace` directives in go.mod that break `go install`
+
+**litd (Lightning Terminal):**
+- Config at `/root/.lit/lit.conf` (NOT `litd.conf`)
+- Use top-level `network=regtest` (NOT `lnd.bitcoin.regtest=true` — causes conflicts)
+- `autopilot.disable=true` required for regtest
+- `lnd-mode=integrated` means litd manages lnd internally
+- `lnd.noseedbackup=true` enables auto wallet creation
+
+**Aperture:**
+- Config field names have NO hyphens: `lndhost`, `tlspath`, `macdir` (NOT `lnd-host`, etc.)
+- `insecure: true` disables TLS for internal Docker networking
+
+**lnget:**
+- Config field names: `tls_cert`, `macaroon`, `network` (NOT `tls_cert_path`, etc.)
+- Requires lnd v0.19.0+ (litd v0.15.0-alpha provides v0.19.1-beta)
+- Volume mount must NOT be read-only (`:ro`) — lnget writes logs and token cache
+
+**Bootstrap:**
+- Runs as one-shot container after both litd nodes are healthy
+- Generates lnget config at `/lnget-config/config.yaml` → mounted into backend at `/root/.lnget/`
+- Bakes `invoice.macaroon` for Aperture (least privilege)
+
+### Lightning Testing
 
 ```bash
-# LND + Aperture run in Docker Compose (Pratham's infra)
-# Regtest = mine your own blocks, fund your own wallet, zero external dependencies
+# Start the Lightning stack
+docker compose -f docker/docker-compose.lightning.yml up --build
 
-# Required env vars:
-LND_RPC_HOST=localhost:10009
-LND_MACAROON_PATH=/path/to/admin.macaroon
-LND_TLS_CERT_PATH=/path/to/tls.cert
-APERTURE_URL=http://localhost:8081
+# Wait for "Bootstrap complete!", then:
+
+# 1. Direct premium data (bypass L402)
+curl http://localhost:8082/v1/legal/h1b
+
+# 2. Via Aperture (should get 402)
+curl -v http://localhost:8081/v1/legal/h1b
+
+# 3. Full L402 flow (from inside backend container)
+docker compose -f docker/docker-compose.lightning.yml exec backend lnget --max-cost=500 -k http://aperture:8081/v1/legal/h1b
+
+# 4. Python test suite
+python scripts/test_l402_flow.py
 ```
 
-### What's Real vs. Mocked (Lightning-specific)
+### What's Mocked vs Real (Quick Reference)
 
-**Real:** LND on regtest, real Lightning invoices, real macaroon auth, real L402 HTTP flow via Aperture
-**Simplified:** Pre-funded wallet (no channel management complexity), mock premium data behind real payment gates
-**For demo safety:** Cached premium responses as fallback if LND is down
+| Component | Status | File | Owner |
+|-----------|--------|------|-------|
+| L402 payment flow (lnget) | 🟢 REAL | `l402_client.py` | Praneeth |
+| Lightning nodes (litd) | 🟢 REAL (regtest) | `docker-compose.lightning.yml` | Praneeth/Pratham |
+| Aperture L402 proxy | 🟢 REAL | `aperture.yaml` | Praneeth |
+| Bootstrap (wallet, channel) | 🟢 REAL (regtest) | `bootstrap-regtest.sh` | Praneeth |
+| Premium data content | 🟡 MOCK (3 scenarios) | `mock_services/premium_data.py` | Replace with real APIs |
+| Scenario detection | 🟡 MOCK (keyword match) | `premium_agent.py` | Rudra (LLM classify) |
+| API routes | 🔴 TODO | `main.py` | Rudra |
+| LLM API keys | 🔴 TODO (empty) | `config.py` | Rudra |
+| SSE streaming | 🟢 READY (events defined) | `premium_agent.py` | Samank (consume) |
+| Aperture prices | 🟡 DEMO VALUES | `aperture.yaml` | Praneeth |
 
-### Reference
+Each file has detailed `INTEGRATION GUIDE` comments explaining what's mocked, what's real, and how to replace mocks with real implementations.
 
-- [lightning-agent-tools](https://github.com/lightninglabs/lightning-agent-tools) — Lightning Labs toolkit (aperture, lnget, LND setup)
+### What NOT to Change (Lightning)
+
+- Don't add gRPC/protobuf Python dependencies — we use lnget exclusively
+- The premium data content in `mock_services/premium_data.py` is curated for 3 demo scenarios (h1b, student_loan, tariff) — keep it deep and specific
+- Don't remove `insecure: true` from aperture.yaml — needed for internal Docker networking
+
+### Lightning References
+
+- [lightning-agent-tools](https://github.com/lightninglabs/lightning-agent-tools) — Lightning Labs toolkit
 - [L402 for Agents blog post](https://lightning.engineering/posts/2026-03-11-L402-for-agents/)
 
 ---
@@ -374,6 +458,7 @@ The backend streams intermediate results so the user sees agents working in real
 | `sector_agent_started` | Agent name | 4 agent cards appear |
 | `sector_agent_tool_call` | Agent + tool + query | Per-agent live feed |
 | `sector_agent_complete` | SectorReport summary | Agent card fills with findings |
+| `lightning_payment` | Service + amount + status | Lightning bolt animation + sat counter |
 | `debate_challenge` | AgentChallenge | Challenge cards with red highlighting |
 | `revision_complete` | AgentRebuttal | Concede/defend/revise per challenge |
 | `synthesis_complete` | SynthesisReport + Sankey data | Final report + animated Sankey |
@@ -420,8 +505,8 @@ The backend streams intermediate results so the user sees agents working in real
 cp .env.example .env
 # Fill in: FRED_API_KEY, BLS_API_KEY, TAVILY_API_KEY, LLM API key
 
-# Docker (full stack)
-docker compose up --build
+# Docker (full stack including Lightning)
+docker compose -f docker/docker-compose.lightning.yml up --build
 
 # Backend only (dev)
 cd backend && pip install -r requirements.txt
