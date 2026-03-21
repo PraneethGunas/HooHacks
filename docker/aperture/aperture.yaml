@@ -1,0 +1,81 @@
+# PolicyPulse — Aperture L402 reverse proxy config
+# Matches lightning-agent-tools aperture.yaml.template pattern
+#
+# ===========================================================================
+# INTEGRATION GUIDE
+# ===========================================================================
+#
+# STATUS: 🟢 REAL L402 proxy — actually gates endpoints behind Lightning invoices.
+#
+# WHAT'S REAL:
+#   - Aperture is a real L402 reverse proxy from Lightning Labs
+#   - Invoices are generated and paid on regtest (real crypto, test network)
+#   - Macaroon-based auth tokens are cryptographically valid
+#
+# WHAT'S HARDCODED (demo-safe, not mocks):
+#   - Prices are arbitrary demo values (10, 25, 15 sats)
+#   - All 3 services route to the same backend (premium-data:8082)
+#   - insecure: true — no TLS between Docker containers
+#
+# TO ADD A NEW PREMIUM SERVICE:
+#   1. Add endpoint(s) in premium_data.py (or a new FastAPI service)
+#   2. Add a new service block below with pathregexp matching your routes
+#   3. Set a price in sats (this is what the agent pays per request)
+#   4. Restart aperture: docker compose restart aperture
+#
+# OWNER: Praneeth (Aperture config) + whoever adds new premium endpoints
+# ===========================================================================
+
+listenaddr: "0.0.0.0:8081"
+debuglevel: "debug"
+
+# 🟢 REAL: Disable TLS for internal Docker networking.
+# For production, set insecure: false and configure TLS certs.
+insecure: true
+
+# 🟢 REAL: LND connection to the seller node (receives payments)
+authenticator:
+  lndhost: "litd-seller:10009"
+  tlspath: "/lnd-seller/tls.cert"
+  macdir: "/lnd-seller/data/chain/bitcoin/regtest"
+  network: "regtest"
+
+# 🟢 REAL: SQLite token storage
+dbbackend: "sqlite"
+datasource: "/aperture/data/aperture.db"
+
+# ---------------------------------------------------------------------------
+# Premium data services — gated behind L402 invoices
+# 🟡 PRICES ARE DEMO VALUES — adjust per your cost model
+#
+# To add a new service, copy a block and change:
+#   name, pathregexp, price
+# The address stays the same if all services share premium-data:8082
+# ---------------------------------------------------------------------------
+services:
+  - name: "premium-legal-db"
+    hostregexp: ".*"
+    pathregexp: "^/v1/legal/.*"
+    address: "premium-data:8082"
+    protocol: "http"
+    price: 10       # 🟡 DEMO PRICE: 10 sats per legal data request
+    auth_whitelist:
+      - "^/health$"
+
+  - name: "premium-econ-models"
+    hostregexp: ".*"
+    pathregexp: "^/v1/econ-models/.*"
+    address: "premium-data:8082"
+    protocol: "http"
+    price: 25       # 🟡 DEMO PRICE: 25 sats per econ model request
+    auth_whitelist:
+      - "^/health$"
+
+  - name: "premium-research"
+    hostregexp: ".*"
+    pathregexp: "^/v1/research/.*"
+    address: "premium-data:8082"
+    protocol: "http"
+    price: 15       # 🟡 DEMO PRICE: 15 sats per research paper request
+    auth_whitelist:
+      - "^/health$"
