@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+WORKDIR /app/frontend
+
+# Install deps first (layer cache)
+COPY frontend/package*.json ./
+RUN npm install
+
+# Copy source
+COPY frontend/ ./
+
+EXPOSE 3000
+
+# TODO (Samank): update once frontend framework is confirmed (Next.js / Vite)
+CMD ["npm", "run", "dev"]

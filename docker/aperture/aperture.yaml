@@ -1,0 +1,51 @@
+# ============================================================
+# Aperture — L402 Reverse Proxy Config
+# Gates premium mock services behind Lightning invoices.
+# Docs: https://github.com/lightninglabs/aperture
+# ============================================================
+
+listenaddr: "0.0.0.0:8081"
+debuglevel: "info"
+
+# ── Lightning node connection ────────────────────────────────
+authenticator:
+  lnd:
+    host: "lnd:10009"
+    macaroonpath: "/lnd/data/chain/bitcoin/regtest/admin.macaroon"
+    tlscertpath: "/lnd/tls.cert"
+
+# ── Services gated behind L402 ───────────────────────────────
+services:
+  - name: "premium-legal-db"
+    hostregexp: ".*"
+    pathregexp: "^/legal.*"
+    address: "premium-legal-db:9001"
+    protocol: http
+    capabilities:
+      - readonly
+    constraints:
+      # 10 sats per request
+      - "time < 24h"
+    price: 10
+
+  - name: "premium-econ-models"
+    hostregexp: ".*"
+    pathregexp: "^/econ.*"
+    address: "premium-econ-models:9002"
+    protocol: http
+    capabilities:
+      - readonly
+    constraints:
+      - "time < 24h"
+    price: 25
+
+  - name: "premium-research"
+    hostregexp: ".*"
+    pathregexp: "^/research.*"
+    address: "premium-research:9003"
+    protocol: http
+    capabilities:
+      - readonly
+    constraints:
+      - "time < 24h"
+    price: 15
