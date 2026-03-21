@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0a0c0f;
+  --bg-surface: #111318;
+  --bg-elevated: #181c23;
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-emphasis: rgba(255, 255, 255, 0.16);
+
+  --text-primary: #f0eee8;
+  --text-secondary: #8a8880;
+  --text-tertiary: #555350;
+
+  --accent-gold: #f59e0b;
+  --accent-gold-dim: #92400e;
+  --green-empirical: #22c55e;
+  --green-dim: #166534;
+  --blue-theoretical: #60a5fa;
+  --blue-dim: #1d4ed8;
+  --amber-speculative: #fbbf24;
+  --red-debate: #f87171;
+  --red-dim: #7f1d1d;
+}
+
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+}
+
+* {
+  border-color: var(--border-default);
+}
+
+body {
+  background: radial-gradient(circle at 10% 0%, rgba(245, 158, 11, 0.08) 0%, transparent 32%),
+    radial-gradient(circle at 100% 100%, rgba(96, 165, 250, 0.07) 0%, transparent 28%), var(--bg-primary);
+  color: var(--text-primary);
+}
+
+@keyframes slideFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideRightIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes oncePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.65);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(251, 191, 36, 0);
+  }
+}
+
+@keyframes indeterminateBar {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(220%);
+    opacity: 0.5;
+  }
+}
+
+.enter-card {
+  animation: slideFadeIn 300ms ease-out;
+}
+
+.debate-enter {
+  animation: slideRightIn 300ms ease-out;
+}
+
+.lightning-flash {
+  animation: oncePulse 600ms ease-out 1;
+}
+
+.progress-track {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(245, 158, 11, 0.9) 50%, transparent 100%);
+  width: 40%;
+  animation: indeterminateBar 1.25s ease-in-out infinite;
+}
