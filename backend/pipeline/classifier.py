@@ -132,10 +132,27 @@ async def run_classifier(state: PipelineState, emit: EventCallback) -> PipelineS
     state.policy_type = result.get("policy_type", "other")
     state.policy_params = result
 
+    # Emit both backend and frontend event shapes for compatibility
+    frontend_data = {
+        # Frontend-expected fields
+        "task_type": result.get("policy_type", "other"),
+        "policy_params": {
+            "jurisdiction": "US",  # Default to US if not specified
+            **result.get("parameters", {}),
+        },
+        "affected_sectors": ["labor", "housing", "consumer", "business"],
+        "extracted_tags": result.get("affected_populations", []),
+        # Keep backend fields for backward compat
+        "policy_type": result.get("policy_type", "other"),
+        "policy_name": result.get("policy_name", ""),
+        "parameters": result.get("parameters", {}),
+        "affected_populations": result.get("affected_populations", []),
+    }
+
     await emit({
         "type": "classifier_complete",
         "agent": "classifier",
-        "data": result,
+        "data": frontend_data,
     })
 
     return state

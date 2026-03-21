@@ -186,6 +186,30 @@ export interface ErrorEvent {
   timestamp: string;
 }
 
+export interface PipelineCompleteEvent {
+  type: "pipeline_complete";
+  data: { session_id: string; total_seconds: number; stage_times: Record<string, number> };
+  timestamp: string;
+}
+
+export interface PipelineErrorEvent {
+  type: "pipeline_error";
+  data: { error: string; stage?: string };
+  timestamp: string;
+}
+
+export interface AgentStartEvent {
+  type: "agent_start";
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface AgentResultEvent {
+  type: "agent_result";
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
 export type PipelineEvent =
   | ClassifierCompleteEvent
   | AnalystToolCallEvent
@@ -197,7 +221,11 @@ export type PipelineEvent =
   | DebateChallengeEvent
   | RevisionCompleteEvent
   | SynthesisCompleteEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | PipelineCompleteEvent
+  | PipelineErrorEvent
+  | AgentStartEvent
+  | AgentResultEvent;
 
 export interface PipelineState {
   status: "idle" | "running" | "complete" | "error";

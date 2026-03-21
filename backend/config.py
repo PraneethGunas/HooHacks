@@ -61,10 +61,7 @@ class Settings(BaseSettings):
     debug: bool = True
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # LLM settings
-    gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key")
-    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
-    anthropic_api_key: Optional[str] = Field(None, description="Anthropic API key")
+    # LLM routing
     llm_provider: str = Field("gemini", description="LLM provider: gemini, openai, or anthropic")
     llm_model_name: str = Field("gemini-2.5-flash", description="LLM model name")
 

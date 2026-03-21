@@ -139,13 +139,22 @@ async def run_analyst(state: PipelineState, emit: EventCallback) -> PipelineStat
     }
     state.tool_calls = tool_records
 
+    # Emit both backend and frontend event shapes for compatibility
+    tools_succeeded = sum(1 for t in tool_records if t["success"])
+    briefing_summary_text = briefing_summary[:500] if briefing_summary else "Data gathered"
+
     await emit({
         "type": "analyst_complete",
         "agent": "analyst",
         "data": {
+            # Frontend-expected fields
+            "briefing_summary": briefing_summary_text,
+            "sources_found": tools_succeeded,
+            "tool_calls_made": len(tool_records),
+            # Keep backend fields for backward compat
             "tools_called": len(tool_records),
-            "tools_succeeded": sum(1 for t in tool_records if t["success"]),
-            "summary": briefing_summary[:500] if briefing_summary else "Data gathered",
+            "tools_succeeded": tools_succeeded,
+            "summary": briefing_summary_text,
         },
     })
 

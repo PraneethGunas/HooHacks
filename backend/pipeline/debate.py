@@ -174,14 +174,18 @@ async def run_debate(state: PipelineState, emit: EventCallback) -> PipelineState
 
     # Emit challenge events
     for ch in challenges:
+        # Emit with frontend-expected shape (wrapped in "challenge" key)
         await emit({
             "type": "debate_challenge",
             "agent": "debate",
             "data": {
-                "target_agent": ch.target_agent,
-                "target_claim": ch.target_claim.claim,
-                "challenge_type": ch.challenge_type.value,
-                "counter_evidence": ch.counter_evidence,
+                "challenge": {
+                    "target_agent": ch.target_agent,
+                    "target_claim": ch.target_claim.model_dump(),  # Full CausalClaim object
+                    "challenge_type": ch.challenge_type.value,
+                    "counter_evidence": ch.counter_evidence,
+                    "proposed_revision": ch.proposed_revision,
+                },
             },
         })
 
@@ -249,16 +253,19 @@ async def run_debate(state: PipelineState, emit: EventCallback) -> PipelineState
 
     state.rebuttals = rebuttals
 
-    # Emit revision events
+    # Emit revision events with frontend-expected shape
     for rb in rebuttals:
         await emit({
             "type": "revision_complete",
             "agent": rb.challenge.target_agent,
             "data": {
-                "original_claim": rb.original_claim.claim,
-                "challenge_type": rb.challenge.challenge_type.value,
-                "response": rb.response.value,
-                "revised_claim": rb.revised_claim.claim if rb.revised_claim else None,
+                "rebuttal": {
+                    "original_claim": rb.original_claim.model_dump(),
+                    "challenge": rb.challenge.model_dump(),
+                    "response": rb.response.value,
+                    "revised_claim": rb.revised_claim.model_dump() if rb.revised_claim else None,
+                    "new_evidence": rb.new_evidence,
+                },
             },
         })
 

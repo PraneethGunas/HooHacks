@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import { buildMockTimeline } from "@/lib/mockEvents";
 import type { PipelineEvent, PipelineState } from "@/types/pipeline";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const DEFAULT_AGENTS = ["Labor", "Consumer", "Business", "Housing"];
 
 function buildInitialSectorAgents(): PipelineState["sectorAgents"] {
@@ -77,6 +78,16 @@ function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
       return { ...state, rebuttals: [...state.rebuttals, event.data.rebuttal] };
     case "synthesis_complete":
       return { ...state, status: "complete", synthesis: event.data.report };
+    case "pipeline_complete":
+      return { ...state, status: "complete" };
+    case "pipeline_error":
+      return { ...state, status: "error", error: event.data.error || "Pipeline failed" };
+    case "agent_start":
+      // Informational event, no state change needed
+      return state;
+    case "agent_result":
+      // Informational event, no state change needed
+      return state;
     case "error":
       return { ...state, status: "error", error: event.data.message };
     default:
@@ -158,11 +169,43 @@ export function usePipeline() {
     async (query: string) => {
       cleanup();
       dispatch({ type: "pipeline/start", query });
+      startTimer();
 
-      // Demo mode: backend is temporarily disabled, so we always replay mock events.
-      runMockPipeline(query);
+      const url = `${API_BASE}/stream?query=${encodeURIComponent(query)}`;
+      let receivedAnyEvents = false;
+
+      try {
+        const es = new EventSource(url);
+        esRef.current = es;
+
+        es.addEventListener("message", (event: MessageEvent) => {
+          receivedAnyEvents = true;
+          try {
+            const data = JSON.parse(event.data);
+            dispatchEvent(data);
+          } catch (err) {
+            console.error("Failed to parse SSE event:", err, event.data);
+          }
+        });
+
+        es.addEventListener("error", () => {
+          if (!receivedAnyEvents) {
+            console.log("Backend unreachable, falling back to mock events");
+            if (esRef.current) {
+              esRef.current.close();
+              esRef.current = null;
+            }
+            runMockPipeline(query);
+          } else {
+            dispatch({ type: "pipeline/error", message: "Connection lost to backend" });
+          }
+        });
+      } catch (err) {
+        console.error("Failed to create EventSource:", err);
+        runMockPipeline(query);
+      }
     },
-    [cleanup, runMockPipeline],
+    [cleanup, startTimer, dispatchEvent, runMockPipeline],
   );
 
   useEffect(() => cleanup, [cleanup]);

@@ -234,7 +234,10 @@ async def _run_one_sector(
     await emit({
         "type": "sector_agent_started",
         "agent": sector,
-        "data": {"sector": sector},
+        "data": {
+            "sector": sector,
+            "agent": sector.title(),  # Frontend expects capitalized agent name
+        },
     })
 
     # Build the user prompt with briefing data
@@ -262,11 +265,15 @@ async def _run_one_sector(
     except Exception:
         report = _fallback_report(sector, state)
 
-    # Emit completion
+    # Emit completion with both backend and frontend expected shapes
     await emit({
         "type": "sector_agent_complete",
         "agent": sector,
         "data": {
+            # Frontend-expected fields
+            "agent": sector.title(),
+            "report": report.model_dump(),
+            # Keep backend fields for backward compat
             "sector": sector,
             "direct_effects": len(report.direct_effects),
             "second_order_effects": len(report.second_order_effects),

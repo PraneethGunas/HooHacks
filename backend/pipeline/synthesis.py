@@ -246,10 +246,91 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         },
     )
 
+    # Build frontend-expected event shape with reshaped data
+    # Uppercase all confidence levels in key claims
+    all_direct_effects = []
+    for report in state.sector_reports:
+        for claim in report.direct_effects:
+            claim_dict = claim.model_dump()
+            claim_dict["confidence"] = claim.confidence.value.upper()
+            all_direct_effects.append(claim_dict)
+
+    # Generate headline stats from confidence breakdown
+    confidence_breakdown = _count_confidences(state)
+    total_claims = sum(confidence_breakdown.values())
+    headline_stats = [
+        {
+            "label": "Claims Analyzed",
+            "value": str(total_claims),
+            "sub": "across 4 sectors",
+        },
+        {
+            "label": "Evidence-Based",
+            "value": str(confidence_breakdown.get("empirical", 0)),
+            "sub": "with direct data",
+        },
+        {
+            "label": "Challenges Survived",
+            "value": str(sum(1 for cs in challenge_survival if cs.survived)),
+            "sub": "after debate",
+        },
+    ]
+
+    # Build reshaped policy_summary
+    policy_summary = {
+        "title": state.policy_params.get("policy_name", "Policy"),
+        "scope": ", ".join(str(v) for v in state.policy_params.get("parameters", {}).values()),
+        "affected_sectors": ["labor", "housing", "consumer", "business"],
+    }
+
+    # Build reshaped unified_impact
+    unified_impact_reshaped = {
+        "summary": unified.summary,
+        "headline_stats": headline_stats,
+        "key_claims": all_direct_effects,
+    }
+
+    # Build reshaped challenge_survival with proper shape
+    challenge_survival_reshaped = [
+        {
+            "challenge": cs.challenge.model_dump(),
+            "outcome": cs.rebuttal.response.value,
+            "final_claim": cs.rebuttal.revised_claim.model_dump() if cs.rebuttal.revised_claim else cs.challenge.target_claim.model_dump(),
+        }
+        for cs in challenge_survival
+    ]
+
+    # Estimate total_llm_calls from stage count (rough estimate)
+    total_llm_calls = 1 + 1 + 4 + 2 + 1  # classifier + analyst + 4 sectors + debate stages + synthesis
+
+    # Compute total duration from stage_times
+    duration_ms = int(sum(state.stage_times.values()) * 1000) if state.stage_times else 0
+
+    # Build metadata with expected shape
+    metadata = {
+        "total_tool_calls": len(state.tool_calls),
+        "total_llm_calls": total_llm_calls,
+        "duration_ms": duration_ms,
+        "lightning_payments": state.payments,
+    }
+
+    # Build final report with frontend-expected shape
+    report_data = {
+        "policy_summary": policy_summary,
+        "unified_impact": unified_impact_reshaped,
+        "sankey_data": sankey.model_dump(),
+        "disagreements": [d.model_dump() for d in disagreements],
+        "agreed_findings": [a.model_dump() for a in agreed],
+        "challenge_survival": challenge_survival_reshaped,
+        "metadata": metadata,
+    }
+
     await emit({
         "type": "synthesis_complete",
         "agent": "synthesis",
-        "data": state.synthesis.model_dump(),
+        "data": {
+            "report": report_data,
+        },
     })
 
     return state
