@@ -20,5 +20,12 @@ class Settings(BaseSettings):
     semantic_scholar_key: Optional[str] = Field(None, description="Semantic Scholar API key (optional)")
     openalex_email: str = Field("policypulse@hoohacks.io", description="Email for OpenAlex polite pool")
 
+    # LLM settings
+    gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key")
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
+    anthropic_api_key: Optional[str] = Field(None, description="Anthropic API key")
+    llm_provider: str = Field("gemini", description="LLM provider: gemini, openai, or anthropic")
+    llm_model_name: str = Field("gemini-2.5-flash", description="LLM model name")
+
 
 settings = Settings()

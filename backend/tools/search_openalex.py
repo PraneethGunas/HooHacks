@@ -21,14 +21,14 @@ def _reconstruct_abstract(inverted_index: dict[str, list[int]] | None) -> str | 
 
 
 async def search_openalex(
-    query: str, sort_by: str = "cited_by_count", limit: int = 5
+    query: str, sort_by: str = "relevance_score", limit: int = 5
 ) -> SearchOpenAlexOutput:
     """Search OpenAlex for academic works on economic topics."""
     params = {
         "search": query,
-        "sort": f"{sort_by}:desc",
         "per_page": limit,
         "mailto": settings.openalex_email,
+        "sort": f"{sort_by}:desc",
     }
     data = await fetch_json(OPENALEX_URL, params=params)
 
