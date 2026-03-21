@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from backend.config import settings
 from backend.tools._http import fetch_json
@@ -12,11 +14,16 @@ S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 
 FIELDS = "title,year,citationCount,tldr,abstract,authors,externalIds,publicationTypes,url"
 
+# Simple rate limiter: track last request time, enforce 1 req/sec minimum gap
+_last_s2_request: float = 0.0
+
 
 async def search_academic_papers(
     query: str, year_range: str = "2015-2026", limit: int = 5
 ) -> SearchPapersOutput:
     """Search Semantic Scholar for academic papers on economic topics."""
+    global _last_s2_request
+
     params: dict = {
         "query": query,
         "limit": limit,
@@ -35,6 +42,13 @@ async def search_academic_papers(
         logger.warning(
             "SEMANTIC_SCHOLAR_KEY not set. Using unauthenticated access (100 req/5min)."
         )
+
+    # Rate limit: wait until at least 1.1s since last request
+    now = time.monotonic()
+    wait = max(0, 1.1 - (now - _last_s2_request))
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _last_s2_request = time.monotonic()
 
     data = await fetch_json(S2_SEARCH_URL, params=params, headers=headers or None)
 
