@@ -1,0 +1,15 @@
+# Bootstrap container — needs lncli + bitcoin-cli + jq + bash
+#
+# lncli comes from the litd image (which pulled successfully)
+# bitcoin-cli comes from lncm/bitcoind (confirmed arm64)
+
+FROM lightninglabs/lightning-terminal:v0.15.0-alpha AS litd
+FROM lncm/bitcoind:v27.0
+
+USER root
+RUN apk add --no-cache bash jq
+
+# lncli lives at /bin/lncli in the litd image
+COPY --from=litd /bin/lncli /usr/local/bin/lncli
+
+ENTRYPOINT ["/bin/bash"]

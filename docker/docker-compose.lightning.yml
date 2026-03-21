@@ -1,0 +1,165 @@
+# PolicyPulse — Lightning stack (Docker Compose)
+#
+# Rebuilt to align with lightning-agent-tools patterns:
+#   - litd (Lightning Terminal) instead of raw lnd — bundles lnd + loop + pool + tapd
+#   - lnget for L402 client (installed via go install, config via lnget config init)
+#   - aperture built from source for arm64
+#
+# Architecture:
+#   bitcoind (regtest) → litd-buyer (agent wallet)
+#                      → litd-seller (Aperture's node)
+#                                ↓
+#                           aperture (L402 proxy, port 8081)
+#                                ↓
+#                           premium-data (FastAPI, port 8082)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.lightning.yml up --build
+#   # Wait for bootstrap to log "Bootstrap complete!", then:
+#   curl -v http://localhost:8081/v1/legal/h1b   # → 402 Payment Required
+
+services:
+  # -----------------------------------------------------------------------
+  # Bitcoin Core (regtest) — lncm/bitcoind has native arm64
+  # -----------------------------------------------------------------------
+  bitcoind:
+    image: lncm/bitcoind:v27.0
+    command:
+      - -regtest
+      - -rpcuser=policypulse
+      - -rpcpassword=policypulse
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+      - -fallbackfee=0.00001
+    volumes:
+      - bitcoind-data:/home/bitcoin/.bitcoin
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=policypulse", "-rpcpassword=policypulse", "getblockchaininfo"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # -----------------------------------------------------------------------
+  # litd — Buyer node (PolicyPulse agent's wallet)
+  # Lightning Terminal: lnd + loop + pool + tapd in one container
+  # -----------------------------------------------------------------------
+  litd-buyer:
+    image: lightninglabs/lightning-terminal:v0.15.0-alpha
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    ports:
+      - "8443:8443"    # litd HTTPS (UI + gRPC + REST)
+      - "10009:10009"  # lnd gRPC
+      - "8080:8080"    # lnd REST
+    volumes:
+      - litd-buyer-data:/root/.lnd
+      - litd-buyer-lit:/root/.lit
+      - ./litd/buyer-lit.conf:/root/.lit/lit.conf:ro
+    healthcheck:
+      test: ["CMD", "lncli", "--network=regtest", "--rpcserver=localhost:10009", "getinfo"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # -----------------------------------------------------------------------
+  # litd — Seller node (Aperture's payment recipient)
+  # -----------------------------------------------------------------------
+  litd-seller:
+    image: lightninglabs/lightning-terminal:v0.15.0-alpha
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    volumes:
+      - litd-seller-data:/root/.lnd
+      - litd-seller-lit:/root/.lit
+      - ./litd/seller-lit.conf:/root/.lit/lit.conf:ro
+    healthcheck:
+      test: ["CMD", "lncli", "--network=regtest", "--rpcserver=localhost:10009", "getinfo"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # -----------------------------------------------------------------------
+  # Aperture — L402 reverse proxy (built from source for arm64)
+  # -----------------------------------------------------------------------
+  aperture:
+    build:
+      context: .
+      dockerfile: Dockerfile.aperture
+    command: ["--configfile=/aperture/aperture.yaml"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./aperture/aperture.yaml:/aperture/aperture.yaml:ro
+      - litd-seller-data:/lnd-seller:ro
+      - aperture-data:/aperture/data
+
+  # -----------------------------------------------------------------------
+  # Mock Premium Data Services (behind Aperture)
+  # -----------------------------------------------------------------------
+  premium-data:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.premium-data
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # -----------------------------------------------------------------------
+  # Bootstrap — one-shot: fund wallet, open channel, bake macaroons
+  # -----------------------------------------------------------------------
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.bootstrap
+    entrypoint: ["/bin/bash", "/scripts/bootstrap-regtest.sh"]
+    depends_on:
+      litd-buyer:
+        condition: service_healthy
+      litd-seller:
+        condition: service_healthy
+    volumes:
+      - ../scripts/bootstrap-regtest.sh:/scripts/bootstrap-regtest.sh:ro
+      - litd-buyer-data:/lnd-buyer
+      - litd-seller-data:/lnd-seller
+      - lnget-config:/lnget-config
+    restart: "no"
+
+  # -----------------------------------------------------------------------
+  # PolicyPulse Backend (lnget installed, config from bootstrap)
+  # -----------------------------------------------------------------------
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app/backend
+      - lnget-config:/root/.lnget
+      - litd-buyer-data:/root/.lnd:ro
+    environment:
+      - APERTURE_URL=http://aperture:8081
+      - LNGET_MAX_COST_SATS=500
+
+volumes:
+  bitcoind-data:
+  litd-buyer-data:
+  litd-buyer-lit:
+  litd-seller-data:
+  litd-seller-lit:
+  aperture-data:
+  lnget-config:
