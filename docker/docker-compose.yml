@@ -1,16 +1,15 @@
 version: "3.9"
 
 # ============================================================
-# PolicyPulse — Docker Compose Skeleton
+# PolicyPulse — Docker Compose
 # Pratham owns this file (infra module)
 #
 # Services:
-#   bitcoind       — Bitcoin regtest node (LND dependency)
-#   lnd            — Lightning Network node (regtest)
-#   aperture       — L402 reverse proxy (gates premium services)
-#   premium-*      — Mock premium data services (behind Aperture)
-#   backend        — FastAPI (port 8000)
-#   frontend       — React/Next.js (port 3000)
+#   backend   — FastAPI (port 8000)
+#   frontend  — React/Next.js (port 3000)
+#
+# TODO (Praneeth): bitcoind, LND, Aperture, and mock premium
+#   services will be added here when the Lightning layer is ready.
 #
 # Quick start:
 #   cp ../.env.example ../.env  # fill in API keys
@@ -20,10 +19,6 @@ version: "3.9"
 networks:
   policypulse:
     driver: bridge
-
-volumes:
-  lnd_data:
-  bitcoin_data:
 
 # ── Shared env for all Python services ─────────────────────
 x-backend-env: &backend-env
@@ -46,120 +41,6 @@ x-backend-env: &backend-env
 
 services:
 
-  # ── Bitcoin regtest ─────────────────────────────────────
-  bitcoind:
-    image: ruimarinho/bitcoin-core:latest
-    container_name: policypulse-bitcoind
-    networks:
-      - policypulse
-    volumes:
-      - bitcoin_data:/home/bitcoin/.bitcoin
-    command:
-      - -regtest=1
-      - -rpcuser=bitcoin
-      - -rpcpassword=bitcoin
-      - -rpcallowip=0.0.0.0/0
-      - -rpcbind=0.0.0.0
-      - -zmqpubrawblock=tcp://0.0.0.0:28332
-      - -zmqpubrawtx=tcp://0.0.0.0:28333
-      - -fallbackfee=0.0002
-    ports:
-      - "18443:18443"   # regtest RPC
-      - "28332:28332"   # ZMQ blocks
-      - "28333:28333"   # ZMQ txs
-    healthcheck:
-      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=bitcoin", "-rpcpassword=bitcoin", "getblockchaininfo"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  # ── LND ─────────────────────────────────────────────────
-  lnd:
-    image: lightninglabs/lnd:v0.18.0-beta
-    container_name: policypulse-lnd
-    networks:
-      - policypulse
-    depends_on:
-      bitcoind:
-        condition: service_healthy
-    volumes:
-      - lnd_data:/root/.lnd
-      - ./lnd/lnd.conf:/root/.lnd/lnd.conf:ro
-    ports:
-      - "10009:10009"   # gRPC
-      - "8080:8080"     # REST
-      - "9735:9735"     # P2P
-    environment:
-      - LND_CHAIN=regtest
-    healthcheck:
-      test: ["CMD", "lncli", "--network=regtest", "getinfo"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 30s
-
-  # ── Aperture (L402 proxy) ────────────────────────────────
-  aperture:
-    image: lightninglabs/aperture:latest
-    container_name: policypulse-aperture
-    networks:
-      - policypulse
-    depends_on:
-      lnd:
-        condition: service_healthy
-    volumes:
-      - ./aperture/aperture.yaml:/app/aperture.yaml:ro
-      - lnd_data:/lnd:ro
-    ports:
-      - "8081:8081"
-    command: ["/app/aperture", "--configfile=/app/aperture.yaml"]
-
-  # ── Mock Premium Services (behind Aperture) ──────────────
-  premium-legal-db:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.premium
-    container_name: policypulse-premium-legal
-    networks:
-      - policypulse
-    environment:
-      <<: *backend-env
-      SERVICE_NAME: premium-legal-db
-      SERVICE_PORT: "9001"
-    ports:
-      - "9001:9001"
-    # TODO (Praneeth): wire mock data for legal analysis / regulatory impact
-
-  premium-econ-models:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.premium
-    container_name: policypulse-premium-econ
-    networks:
-      - policypulse
-    environment:
-      <<: *backend-env
-      SERVICE_NAME: premium-econ-models
-      SERVICE_PORT: "9002"
-    ports:
-      - "9002:9002"
-    # TODO (Praneeth): wire mock econometric model projections
-
-  premium-research:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.premium
-    container_name: policypulse-premium-research
-    networks:
-      - policypulse
-    environment:
-      <<: *backend-env
-      SERVICE_NAME: premium-research
-      SERVICE_PORT: "9003"
-    ports:
-      - "9003:9003"
-    # TODO (Praneeth): wire mock premium research papers / datasets
-
   # ── Backend (FastAPI) ────────────────────────────────────
   backend:
     build:
@@ -168,24 +49,15 @@ services:
     container_name: policypulse-backend
     networks:
       - policypulse
-    depends_on:
-      - aperture
     volumes:
       - ../backend:/app/backend   # hot-reload in dev
     ports:
       - "8000:8000"
     environment:
       <<: *backend-env
-      LND_RPC_HOST: lnd:10009
-      LND_MACAROON_PATH: /lnd/data/chain/bitcoin/regtest/admin.macaroon
-      LND_TLS_CERT_PATH: /lnd/tls.cert
-      APERTURE_URL: http://aperture:8081
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ../backend:/app/backend
-      - lnd_data:/lnd:ro
-    # TODO (Praneeth): wire FastAPI entrypoint once backend/ is scaffolded
+    # TODO (Praneeth): add depends_on: aperture once Lightning layer is wired
 
   # ── Frontend ─────────────────────────────────────────────
   frontend:
@@ -198,10 +70,10 @@ services:
     depends_on:
       - backend
     volumes:
-      - ../frontend:/app/frontend   # hot-reload in dev
-      - /app/frontend/node_modules  # prevent overwriting node_modules
+      - ../frontend:/app/frontend
+      - /app/frontend/node_modules
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-    # TODO (Samank): wire Next.js / React entrypoint once frontend/ is scaffolded
+    # TODO (Samank): update entrypoint once frontend framework is confirmed
