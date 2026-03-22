@@ -77,20 +77,25 @@ SECTOR_TOOLS: dict[str, dict[str, list[dict[str, Any]]]] = {
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "MORTGAGE30US"}, "label": "30-year mortgage rate"},
             {"tool": "fred_get_series", "args": {"series_id": "RRVRUSQ156N"}, "label": "Rental vacancy rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25064_001E"], "geography": "state:*"}, "label": "Census ACS: median gross rent by state"},
+            {"tool": "hud_data", "args": {"dataset": "fmr", "entity_id": "VA"}, "label": "HUD Fair Market Rents (Virginia)"},
         ],
         "immigration": [
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "RRVRUSQ156N"}, "label": "Rental vacancy rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25064_001E", "B25077_001E"], "geography": "state:*"}, "label": "Census ACS: median rent & home value by state"},
             {"tool": "scenario", "args": {"variable": "rent_index", "baseline": 100.0, "shock": -2.0, "elasticity": 0.4}, "label": "H1B restriction → rental demand scenario"},
         ],
         "student_loan": [
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "MORTGAGE30US"}, "label": "30-year mortgage rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25077_001E"], "geography": "state:*"}, "label": "Census ACS: median home value by state"},
             {"tool": "scenario", "args": {"variable": "first_time_buyers", "baseline": 26.0, "shock": 15.0, "elasticity": 0.25}, "label": "Loan forgiveness → first-time buyer share scenario"},
         ],
         "tariff": [
             {"tool": "fred_get_series", "args": {"series_id": "WPUSI012011"}, "label": "PPI: construction materials"},
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
+            {"tool": "hud_data", "args": {"dataset": "fmr", "entity_id": "VA"}, "label": "HUD Fair Market Rents (Virginia)"},
             {"tool": "scenario", "args": {"variable": "construction_costs", "baseline": 100.0, "shock": 8.0, "elasticity": 0.6}, "label": "Tariff → construction cost scenario"},
         ],
     },
@@ -205,6 +210,26 @@ async def _execute_tool(
                 elasticity=args["elasticity"],
             )
             return {"tool": "run_scenario_analysis", "label": label, "data": result.to_dict()}
+
+        elif tool_name == "census_acs_query":
+            from backend.tools.census_acs_query import census_acs_query
+            result = await census_acs_query(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "bea_regional_data":
+            from backend.tools.bea_regional_data import bea_regional_data
+            result = await bea_regional_data(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "hud_data":
+            from backend.tools.hud_data import hud_data
+            result = await hud_data(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "code_execute":
+            from backend.tools.code_execute import code_execute
+            result = await code_execute(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
 
         else:
             return {"tool": tool_name, "label": label, "data": {"error": f"unknown tool: {tool_name}"}}
