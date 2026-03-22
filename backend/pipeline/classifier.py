@@ -95,19 +95,32 @@ Required fields:
 
 async def run_classifier(state: PipelineState, emit: EventCallback) -> PipelineState:
     """Stage 0: Classify the query and extract policy parameters."""
+
+    async def _think(step_type: str, content: str, phase: str = "0", tool: str | None = None) -> None:
+        await emit({
+            "type": "classifier_thinking",
+            "agent": "classifier",
+            "data": {"step_type": step_type, "content": content, "phase": phase, "tool": tool},
+        })
+
     await emit({
         "type": "agent_start",
         "agent": "classifier",
         "data": {"query": state.query},
     })
 
+    await _think("phase_start", "Analyzing policy query and extracting structured parameters", "1")
+    await _think("reasoning", f"Input query: \"{state.query}\"", "1")
+
     result = None
 
     # Try ADK Classifier first (Rudra's Google ADK agent — richer extraction)
     try:
+        await _think("tool_call", "Invoking Google ADK classifier (Gemini Flash)", "1", "google_adk")
         from backend.agents.classifier import run_classifier as adk_classify
         adk_output = await adk_classify(state.query)
         if adk_output and adk_output.confidence != "low":
+            await _think("tool_result", f"ADK classification: {adk_output.task_type} (confidence: {adk_output.confidence})", "1", "google_adk")
             result = {
                 "policy_type": adk_output.task_type.value if hasattr(adk_output.task_type, "value") else str(adk_output.task_type),
                 "policy_name": adk_output.cleaned_query or state.query,
@@ -117,13 +130,18 @@ async def run_classifier(state: PipelineState, emit: EventCallback) -> PipelineS
             # Propagate cleaned_query so all downstream stages use the
             # normalised version instead of the raw user input
             if adk_output.cleaned_query:
+                await _think("reasoning", f"Normalized query: \"{adk_output.cleaned_query}\"", "1")
                 state.query = adk_output.cleaned_query
-    except Exception:
-        pass
+        else:
+            confidence = adk_output.confidence if adk_output else "n/a"
+            await _think("tool_result", f"ADK returned low confidence ({confidence}), trying fallback", "1", "google_adk")
+    except Exception as exc:
+        await _think("tool_result", f"ADK unavailable ({type(exc).__name__}), trying LLM fallback", "1", "google_adk")
 
     # Fall back to direct LLM classification
     if not result:
         try:
+            await _think("tool_call", "Classifying via LLM (fast model)", "1", "llm_classify")
             raw = await llm_chat(
                 system_prompt=CLASSIFIER_SYSTEM,
                 user_prompt=f"Policy question: {state.query}\n\nUser context: {json.dumps(state.user_context)}",
@@ -132,21 +150,36 @@ async def run_classifier(state: PipelineState, emit: EventCallback) -> PipelineS
             )
             if raw:
                 result = parse_json_response(raw)
-        except Exception:
-            pass
+                await _think("tool_result", f"LLM classified as: {result.get('policy_type', 'unknown')}", "1", "llm_classify")
+        except Exception as exc:
+            await _think("tool_result", f"LLM classification failed ({type(exc).__name__}), trying keyword match", "1", "llm_classify")
 
     # Fall back to keyword matching
     if not result:
+        await _think("tool_call", "Attempting keyword-based scenario matching", "1", "keyword_match")
         result = _keyword_classify(state.query)
+        if result:
+            await _think("tool_result", f"Keyword match: {result.get('policy_type', 'unknown')}", "1", "keyword_match")
+        else:
+            await _think("tool_result", "No keyword match found", "1", "keyword_match")
 
     # Last resort: generic classification
     if not result:
+        await _think("reasoning", "Using generic classification fallback", "1")
         result = {
             "policy_type": "other",
             "policy_name": "Policy Analysis",
             "parameters": {"query": state.query},
             "affected_populations": ["general public"],
         }
+
+    await _think("reasoning", f"Identified policy type: {result.get('policy_type', 'other')}", "2")
+    if result.get("parameters"):
+        param_summary = ", ".join(f"{k}={v}" for k, v in result["parameters"].items() if v)
+        await _think("reasoning", f"Extracted parameters: {param_summary}", "2")
+    if result.get("affected_populations"):
+        await _think("reasoning", f"Affected groups: {', '.join(result['affected_populations'])}", "2")
+    await _think("phase_complete", "Classification complete — routing to Analyst Agent", "2")
 
     state.policy_type = result.get("policy_type", "other")
     state.policy_params = result
