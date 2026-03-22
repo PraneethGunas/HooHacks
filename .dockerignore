@@ -1,0 +1,50 @@
+# Git
+.git/
+.gitignore
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Environment / secrets
+.env
+*.env.local
+
+# Docker volumes and data
+docker/data/
+
+# Lightning credentials (never bake into images)
+*.macaroon
+tls.cert
+tls.key
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docs / non-build files
+*.md
+LICENSE
