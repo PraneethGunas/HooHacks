@@ -156,6 +156,9 @@ async def run_pipeline(
 
 async def _run_premium(state: PipelineState, emit: EventCallback) -> PipelineState:
     """Stage 1.5: Premium data via L402 Lightning payments."""
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         from backend.lightning.premium_agent import PremiumDataAgent
 
@@ -167,8 +170,13 @@ async def _run_premium(state: PipelineState, emit: EventCallback) -> PipelineSta
         if state.premium_data:
             state.briefing["premium_data"] = state.premium_data
         await agent.close()
+        logger.info(
+            f"Premium stage complete: {len(state.payments)} payments, "
+            f"{len(state.premium_data)} data sources"
+        )
     except Exception as e:
         # Lightning is optional — if it fails, pipeline continues
+        logger.error(f"Premium stage failed: {e}", exc_info=True)
         await emit({
             "type": "agent_result",
             "agent": "premium",

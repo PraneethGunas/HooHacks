@@ -151,6 +151,8 @@ services:
       - ../backend:/app/backend
       - lnget-config:/root/.lnget
       - litd-buyer-data:/root/.lnd:ro
+    env_file:
+      - ../.env
     environment:
       - APERTURE_URL=http://aperture:8081
       - LNGET_MAX_COST_SATS=500
