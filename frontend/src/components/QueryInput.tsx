@@ -34,8 +34,7 @@ export default function QueryInput({ onSubmit, onMockSubmit }: QueryInputProps) 
   };
 
   return (
-    <section className="relative min-h-screen w-full flex flex-col items-center justify-center px-4 py-10 sm:px-8 sm:py-12">
-      {/* Decorative glow */}
+    <section className="relative min-h-screen w-full grid place-items-center px-4 py-10 sm:px-8 sm:py-12">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute right-[8%] bottom-[8%] h-44 w-44 rounded-full"
@@ -44,17 +43,18 @@ export default function QueryInput({ onSubmit, onMockSubmit }: QueryInputProps) 
           filter: "blur(10px)",
         }}
       />
-
-      <div className="mx-auto w-full max-w-2xl enter-card">
-        {/* Logo */}
-        <div className="flex items-center justify-center gap-3 mb-4">
+      <div className="pointer-events-none absolute left-6 top-8 hidden rounded-full border border-[var(--fun-cyan)]/40 bg-[var(--fun-cyan)]/10 px-3 py-1 text-xs text-[var(--fun-cyan)] md:block">
+        Simulation Mode
+      </div>
+      <div className="pointer-events-none absolute right-6 top-8 hidden rounded-full border border-[var(--fun-pink)]/35 bg-[var(--fun-pink)]/10 px-3 py-1 text-xs text-[var(--fun-pink)] md:block">
+        7 Agents • &gt;$50B Focus
+      </div>
+      <div className="mx-auto w-full max-w-3xl enter-card text-center">
+        <div className="mb-8 flex items-center justify-center gap-3 text-base font-medium text-white/80">
           <span className="text-[var(--accent-gold)]">
             <BoltIcon size={32} />
           </span>
-          <span
-            className="tracking-tight text-[44px] leading-none font-semibold text-[var(--text-primary)]"
-            style={{ fontFamily: "var(--font-wordmark), serif" }}
-          >
+          <span className="tracking-tight text-[40px] leading-none font-semibold text-[var(--text-primary)]" style={{ fontFamily: "var(--font-wordmark), serif" }}>
             Policy<span className="logo-pulse-word">Pulse</span>
           </span>
         </div>

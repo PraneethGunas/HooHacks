@@ -12,8 +12,39 @@ import type { SynthesisReport } from "@/types/pipeline";
 
 type Confidence = "HIGH" | "MEDIUM" | "LOW";
 
-interface ResultsPanelProps {
-  report: SynthesisReport;
+interface WaterfallStep {
+  label: string;
+  value: number;
+  cumulative: number;
+  type: "inflow" | "outflow" | "neutral" | "net";
+  note: string | null;
+}
+
+interface WaterfallData {
+  title: string;
+  subtitle: string;
+  household_profile: string;
+  steps: WaterfallStep[];
+  net_monthly: number;
+  net_annual: number;
+  pct_of_income: number;
+}
+
+interface CategoryItem {
+  name: string;
+  dollar_impact_monthly: { low: number; central: number; high: number };
+  pct_change: { low: number; central: number; high: number };
+  confidence: Confidence;
+  explanation: string;
+  note?: string;
+}
+
+interface TimelinePhase {
+  label: string;
+  cumulative_net_monthly: { low: number; central: number; high: number };
+  what_happens: string[];
+  mood: string;
+  dominant_driver: string;
 }
 
 // ─── Color system ─────────────────────────────────────────────────────────────
@@ -140,6 +171,8 @@ function PolicyHeader({ report }: { report: SynthesisReport }) {
   };
   const confKey = (report.headline?.confidence ?? "MEDIUM").toUpperCase();
 
+// Step indicator for the page narrative flow
+function StepBadge({ n, label }: { n: number; label: string }) {
   return (
     <Card className="p-6">
       {/* Tags row */}
@@ -161,6 +194,11 @@ function PolicyHeader({ report }: { report: SynthesisReport }) {
           {headlineConf.label}
         </span>
       </div>
+      <span className="text-xs font-medium uppercase tracking-widest text-white/40">{label}</span>
+      <div className="h-px flex-1 bg-white/8" />
+    </div>
+  );
+}
 
       {/* Title */}
       <h1 className="mb-1 text-2xl font-semibold leading-snug tracking-tight text-white">
