@@ -62,6 +62,27 @@ async def run_analyst(state: PipelineState, emit: EventCallback) -> PipelineStat
         },
     })
 
+    # Emit immediate thinking events so the UI shows activity right away
+    # (graph construction + first LLM call can take several seconds)
+    await emit({
+        "type": "analyst_thinking",
+        "agent": "analyst",
+        "data": {
+            "step_type": "phase_start",
+            "content": f"Starting 5-phase analysis pipeline for: {state.query[:120]}",
+            "phase": "0",
+        },
+    })
+    await emit({
+        "type": "analyst_thinking",
+        "agent": "analyst",
+        "data": {
+            "step_type": "reasoning",
+            "content": f"Policy type: {state.policy_type or 'general'} — initializing LangGraph agent with {len(ANALYST_PHASES)} phases",
+            "phase": "0",
+        },
+    })
+
     try:
         state = await _run_langgraph_analyst(state, emit)
     except Exception as e:
@@ -103,6 +124,19 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
     current_phase = 0
     total_tool_calls = 0
 
+    async def _think(step_type: str, content: str, phase: int, tool: str | None = None) -> None:
+        """Emit a thinking event for the analyst spotlight stream."""
+        await emit({
+            "type": "analyst_thinking",
+            "agent": "analyst",
+            "data": {
+                "step_type": step_type,
+                "content": content,
+                "phase": str(phase),
+                "tool": tool,
+            },
+        })
+
     async for event in graph.astream(initial_state, stream_mode="updates"):
         for node_name, node_output in event.items():
             new_phase = node_output.get("current_phase", current_phase)
@@ -113,9 +147,10 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
                 if current_phase > 0 and current_phase in phase_start_times:
                     phase_duration = time.time() - phase_start_times[current_phase]
                     phase_tool_records = node_output.get("tool_call_log", [])
-                    # tool_call_log is cumulative, count new ones
                     new_tool_count = len(phase_tool_records) - total_tool_calls
                     total_tool_calls = len(phase_tool_records)
+
+                    await _think("phase_complete", f"Phase {current_phase} ({ANALYST_PHASES[current_phase]['name']}) complete — {new_tool_count} tool calls in {phase_duration:.1f}s", current_phase)
 
                     await emit({
                         "type": "analyst_tool_call",
@@ -132,6 +167,9 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
                 if current_phase <= 5:
                     phase_meta = ANALYST_PHASES.get(current_phase, {})
                     phase_start_times[current_phase] = time.time()
+
+                    await _think("phase_start", f"Phase {current_phase}/5: {phase_meta.get('name', 'Unknown')} ({phase_meta.get('type', 'unknown')})", current_phase)
+
                     await emit({
                         "type": "analyst_tool_call",
                         "agent": "analyst",
@@ -141,8 +179,8 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
                         },
                     })
 
-                    # Emit individual tool availability for ReAct phases
                     if phase_meta.get("tools"):
+                        await _think("reasoning", f"Tools available: {', '.join(phase_meta['tools'])}", current_phase)
                         await emit({
                             "type": "analyst_tool_call",
                             "agent": "analyst",
@@ -157,15 +195,30 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
             if new_records and len(new_records) > total_tool_calls:
                 for record in new_records[total_tool_calls:]:
                     if hasattr(record, "tool_name"):
+                        tool_name = record.tool_name
+                        tool_args = json.dumps(record.arguments)[:200] if record.arguments else ""
+                        result_summary = record.result_summary[:150] if hasattr(record, "result_summary") and record.result_summary else ""
+
+                        await _think("tool_call", f"{tool_name}({tool_args})", current_phase, tool_name)
+                        if result_summary:
+                            await _think("tool_result", result_summary, current_phase, tool_name)
+
                         await emit({
                             "type": "analyst_tool_call",
                             "agent": "analyst",
                             "data": {
-                                "tool": record.tool_name,
-                                "query": json.dumps(record.arguments)[:200] if record.arguments else "",
+                                "tool": tool_name,
+                                "query": tool_args,
                             },
                         })
                 total_tool_calls = len(new_records)
+
+            # Emit reasoning content from phase summaries if available
+            for summary_key in ["phase_1_summary", "phase_2_summary", "phase_3_summary"]:
+                summary = node_output.get(summary_key)
+                if summary and isinstance(summary, str):
+                    phase_num = int(summary_key.split("_")[1])
+                    await _think("reasoning", summary[:300], phase_num)
 
             # Check if we got the final briefing
             briefing = node_output.get("phase_5_output")
@@ -173,6 +226,7 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
                 # Final phase complete
                 if current_phase in phase_start_times:
                     phase_duration = time.time() - phase_start_times[current_phase]
+                    await _think("phase_complete", f"Phase 5 (Synthesis & Briefing) complete in {phase_duration:.1f}s", 5)
                     await emit({
                         "type": "analyst_tool_call",
                         "agent": "analyst",
@@ -338,9 +392,22 @@ async def _run_simple_analyst(state: PipelineState, emit: EventCallback) -> Pipe
     briefing_data: dict[str, Any] = {}
     tool_records: list[dict[str, Any]] = []
 
+    # Emit phase start for simple mode (single phase of data gathering)
+    await emit({
+        "type": "analyst_thinking",
+        "agent": "analyst",
+        "data": {"step_type": "phase_start", "content": "Data Gathering (simple mode — LangGraph unavailable)", "phase": "1"},
+    })
+
     for step in strategy:
         tool_name = step["tool"]
         args = step["args"]
+
+        await emit({
+            "type": "analyst_thinking",
+            "agent": "analyst",
+            "data": {"step_type": "tool_call", "content": f"{tool_name}({json.dumps(args)[:120]})", "phase": "1", "tool": tool_name},
+        })
 
         await emit({
             "type": "analyst_tool_call",
@@ -349,17 +416,36 @@ async def _run_simple_analyst(state: PipelineState, emit: EventCallback) -> Pipe
         })
 
         result = await _call_tool(tool_name, args)
+        summary = _summarize_result(tool_name, result)
 
         tool_records.append({
             "tool": tool_name,
             "args": args,
             "success": "error" not in result,
-            "summary": _summarize_result(tool_name, result),
+            "summary": summary,
+        })
+
+        await emit({
+            "type": "analyst_thinking",
+            "agent": "analyst",
+            "data": {"step_type": "tool_result", "content": summary, "phase": "1", "tool": tool_name},
         })
 
         briefing_data[f"{tool_name}_{len(tool_records)}"] = result
 
+    await emit({
+        "type": "analyst_thinking",
+        "agent": "analyst",
+        "data": {"step_type": "reasoning", "content": "Synthesizing briefing from gathered data...", "phase": "1"},
+    })
+
     briefing_summary = await _summarize_briefing(state, briefing_data)
+
+    await emit({
+        "type": "analyst_thinking",
+        "agent": "analyst",
+        "data": {"step_type": "phase_complete", "content": "Briefing assembled", "phase": "1"},
+    })
 
     state.briefing = {
         "raw_data": briefing_data,
