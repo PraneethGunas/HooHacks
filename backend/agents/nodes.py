@@ -119,7 +119,7 @@ async def phase_4_evidence(state: dict) -> dict:
         tools=PHASE_4_TOOLS,
         phase_num=4,
         state=state,
-        recursion_limit=60,  # Phase 4 makes the most tool calls
+        recursion_limit=40,  # Phase 4 makes the most tool calls
     )
 
     evidence = EvidenceOutput(**parsed)
