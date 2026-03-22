@@ -61,30 +61,39 @@ function getAgentStatus(id: AgentId, state: PipelineState): "pending" | "running
 }
 
 function getActiveAgent(state: PipelineState): AgentId {
-  // Return the currently most interesting agent
+  // Stage 0: Classifier running
   if (!state.classifier && state.status === "running") return "classifier";
-  if (!state.analystComplete && state.classifier && state.status === "running") return "analyst";
-  if (state.analystComplete && state.lightningPayments.some(p => p.status === "paying")) return "lightning";
 
-  // During sector phase, pick the one with most recent activity
-  const runningAgents = (["Labor", "Housing", "Consumer", "Business"] as AgentId[]).filter(
-    id => state.sectorAgents[id]?.status === "running"
-  );
+  // Stage 1: Analyst running
+  if (!state.analystComplete && state.classifier && state.status === "running") return "analyst";
+
+  // Stage 3: Synthesis (check before sectors so it wins once synthesis starts)
+  if ((state.synthesisPhase || state.synthesisThinkingSteps.length > 0) && !state.synthesis) return "synthesis";
+
+  // Stage 2: Sector agents — pick the one with most recent thinking step
+  const sectorIds = ["Labor", "Housing", "Consumer", "Business"] as AgentId[];
+  const runningAgents = sectorIds.filter(id => state.sectorAgents[id]?.status === "running");
   if (runningAgents.length > 0) {
-    // Pick the one with the most thinking steps (most active)
     let best = runningAgents[0];
-    let bestSteps = 0;
+    let bestTs = 0;
     for (const id of runningAgents) {
-      const steps = state.sectorAgents[id]?.thinkingSteps.length ?? 0;
-      if (steps > bestSteps) { best = id; bestSteps = steps; }
+      const steps = state.sectorAgents[id]?.thinkingSteps ?? [];
+      const lastTs = steps.length > 0 ? steps[steps.length - 1].timestamp : 0;
+      if (lastTs > bestTs) { best = id; bestTs = lastTs; }
     }
     return best;
   }
 
-  if (state.synthesisPhase && !state.synthesis) return "synthesis";
-  if (state.lightningPayments.length > 0 && !Object.values(state.sectorAgents).some(a => a.status !== "pending")) return "lightning";
+  // Lightning: show when payments exist and sectors haven't started yet, or actively paying
+  if (state.lightningPayments.length > 0) {
+    const sectorsStarted = sectorIds.some(id => state.sectorAgents[id]?.status !== "pending");
+    if (!sectorsStarted || state.lightningPayments.some(p => p.status === "paying")) return "lightning";
+  }
 
-  return "analyst"; // fallback
+  // Fallback: show most recently completed stage
+  if (state.analystComplete) return "analyst";
+  if (state.classifier) return "classifier";
+  return "classifier";
 }
 
 /** Build a unified thinking stream for any agent */
