@@ -43,9 +43,6 @@ export default function QueryInput({ onSubmit, onMockSubmit }: QueryInputProps) 
           filter: "blur(10px)",
         }}
       />
-      <div className="pointer-events-none absolute left-6 top-8 hidden rounded-full border border-[var(--fun-cyan)]/40 bg-[var(--fun-cyan)]/10 px-3 py-1 text-xs text-[var(--fun-cyan)] md:block">
-        Simulation Mode
-      </div>
       <div className="pointer-events-none absolute right-6 top-8 hidden rounded-full border border-[var(--fun-pink)]/35 bg-[var(--fun-pink)]/10 px-3 py-1 text-xs text-[var(--fun-pink)] md:block">
         7 Agents • &gt;$50B Focus
       </div>

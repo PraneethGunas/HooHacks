@@ -68,7 +68,7 @@ export interface HeadlineMetric {
   value: string;
   range: Range | null;
   unit: string;
-  direction: "positive" | "negative" | "neutral";
+  direction: "positive" | "negative" | "neutral" | "Positive" | "Negative" | "Neutral";
   confidence: Confidence;
   icon: string;
   context: string;
@@ -78,7 +78,7 @@ export interface WaterfallStep {
   label: string;
   value: number;
   cumulative: number;
-  type: "inflow" | "outflow" | "neutral" | "net";
+  type: "inflow" | "outflow" | "neutral" | "net" | "base" | "income" | "cost";
   source_agent: string;
   note: string | null;
 }
