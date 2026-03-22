@@ -22,7 +22,7 @@ OWNER: Everyone — each team member sets keys for their module.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -59,11 +59,17 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
 
     # --- LLM settings (agent pipeline) ---
-    # gemini_api_key is an alias for google_api_key, used by ADK classifier
-    gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key")
+    # gemini_api_key is an alias for google_api_key, used by ADK classifier + LangGraph agents
+    gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key (falls back to google_api_key)")
+
     llm_provider: str = Field("gemini", description="LLM provider: gemini, openai, or anthropic")
     llm_model_name: str = Field("gemini-3-flash-preview", description="LLM model name")
     classifier_model_name: str = Field("gemini-3-flash-preview", description="Fast model for Stage 0 ADK Classifier")
+
+    def model_post_init(self, __context: Any) -> None:
+        """Ensure gemini_api_key falls back to google_api_key if not set."""
+        if not self.gemini_api_key and self.google_api_key:
+            self.gemini_api_key = self.google_api_key
 
 
 settings = Settings()

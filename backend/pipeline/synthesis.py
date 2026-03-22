@@ -1,5 +1,5 @@
 """
-Stage 4: Synthesis Agent — aggregates everything into the final report + Sankey data.
+Stage 4: Synthesis Agent — aggregates sector reports + debate results into the final report + Sankey data.
 
 No external tool calls. Works purely on the outputs of previous stages.
 
@@ -23,14 +23,14 @@ from backend.models.pipeline import (
     SynthesisReport,
     PolicySummary,
     AgreedFinding,
-    Disagreement,
     ChallengeOutcome,
+    Disagreement,
+    RebuttalResponse,
     UnifiedImpact,
     SankeyData,
     SankeyNode,
     SankeyLink,
     ConfidenceLevel,
-    RebuttalResponse,
 )
 from backend.pipeline.orchestrator import PipelineState
 from backend.pipeline.llm import llm_chat, parse_json_response
@@ -39,7 +39,7 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 SYNTHESIS_SYSTEM = """You are the SYNTHESIS AGENT in a multi-agent policy analysis system.
-You receive sector reports, debate challenges, and rebuttals. Produce a unified analysis.
+You receive 4 sector reports (labor, housing, consumer, business). Produce a unified analysis.
 
 Respond with JSON:
 {
@@ -82,13 +82,17 @@ def _build_synthesis_context(state: PipelineState) -> str:
         if report.dissent:
             parts.append(f"  [DISSENT] {report.dissent}")
 
-    if state.challenges:
+    # Include debate results if available
+    if hasattr(state, "rebuttals") and state.rebuttals:
         parts.append("\n=== DEBATE RESULTS ===")
         for rb in state.rebuttals:
-            parts.append(
-                f"  Challenge to {rb.challenge.target_agent}: {rb.challenge.target_claim.claim}"
-                f" → Response: {rb.response.value}"
-            )
+            parts.append(f"\n  Challenge to {rb.challenge.target_agent}: {rb.challenge.target_claim.claim}")
+            parts.append(f"    Type: {rb.challenge.challenge_type.value}")
+            parts.append(f"    Response: {rb.response.value}")
+            if rb.revised_claim:
+                parts.append(f"    Revised claim: {rb.revised_claim.claim}")
+            if rb.new_evidence:
+                parts.append(f"    New evidence: {', '.join(rb.new_evidence[:3])}")
 
     return "\n".join(parts)[:8000]
 
@@ -145,12 +149,13 @@ def _build_sankey_data(state: PipelineState, llm_flows: list[dict] | None = None
 
 async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineState:
     """Stage 4: Synthesize all results into the final report."""
+    challenges_issued = len(state.challenges) if hasattr(state, "challenges") else 0
     await emit({
         "type": "agent_start",
         "agent": "synthesis",
         "data": {
             "sectors_analyzed": len(state.sector_reports),
-            "challenges_issued": len(state.challenges),
+            "challenges_issued": challenges_issued,
         },
     })
 
@@ -214,15 +219,6 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         agreed = []
         disagreements = []
 
-    # Build challenge outcomes
-    challenge_survival = []
-    for rb in state.rebuttals:
-        challenge_survival.append(ChallengeOutcome(
-            challenge=rb.challenge,
-            rebuttal=rb,
-            survived=rb.response != RebuttalResponse.CONCEDE,
-        ))
-
     sankey = _build_sankey_data(state, llm_flows)
 
     state.synthesis = SynthesisReport(
@@ -272,7 +268,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         {
             "label": "Challenges Survived",
             "value": str(sum(1 for cs in challenge_survival if cs.survived)),
-            "sub": "after debate",
+            "sub": f"of {len(challenge_survival)} issued",
         },
     ]
 
@@ -290,18 +286,25 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "key_claims": all_direct_effects,
     }
 
-    # Build reshaped challenge_survival with proper shape
-    challenge_survival_reshaped = [
-        {
-            "challenge": cs.challenge.model_dump(),
-            "outcome": cs.rebuttal.response.value,
-            "final_claim": cs.rebuttal.revised_claim.model_dump() if cs.rebuttal.revised_claim else cs.challenge.target_claim.model_dump(),
-        }
-        for cs in challenge_survival
-    ]
+    # Build challenge_survival from debate results
+    challenge_survival = []
+    challenge_survival_reshaped = []
+    if hasattr(state, "rebuttals") and state.rebuttals:
+        for rb in state.rebuttals:
+            survived = rb.response != RebuttalResponse.CONCEDE
+            challenge_survival.append(ChallengeOutcome(
+                challenge=rb.challenge,
+                rebuttal=rb,
+                survived=survived,
+            ))
+            challenge_survival_reshaped.append({
+                "challenge": rb.challenge.model_dump(),
+                "outcome": rb.response.value,
+                "final_claim": (rb.revised_claim or rb.original_claim).model_dump(),
+            })
 
     # Estimate total_llm_calls from stage count (rough estimate)
-    total_llm_calls = 1 + 1 + 4 + 2 + 1  # classifier + analyst + 4 sectors + debate stages + synthesis
+    total_llm_calls = 1 + 1 + 4 + 2 + 1  # classifier + analyst + 4 sectors + debate (2 calls) + synthesis
 
     # Compute total duration from stage_times
     duration_ms = int(sum(state.stage_times.values()) * 1000) if state.stage_times else 0
@@ -314,13 +317,65 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "lightning_payments": state.payments,
     }
 
+    # Build impact_dashboard from sector direct_effects
+    impact_dashboard = []
+    for report in state.sector_reports:
+        for claim in report.direct_effects:
+            # Determine direction from mechanism/effect text
+            effect_lower = (claim.effect + " " + claim.mechanism).lower()
+            if any(w in effect_lower for w in ("increase", "rise", "grow", "higher", "boost", "gain")):
+                direction = "increase"
+            elif any(w in effect_lower for w in ("decrease", "decline", "fall", "lower", "reduce", "drop", "loss")):
+                direction = "decline"
+            elif any(w in effect_lower for w in ("distort", "misalloc", "perverse")):
+                direction = "distortionary"
+            else:
+                direction = "mixed"
+
+            # Determine status from confidence + direction
+            if claim.confidence.value == "empirical":
+                status = "works" if direction in ("increase", "decline") else "tradeoff"
+            elif claim.confidence.value == "speculative":
+                status = "doesnt_work"
+            else:
+                status = "tradeoff"
+
+            impact_dashboard.append({
+                "category": claim.claim[:80],
+                "direction": direction,
+                "magnitude": claim.effect[:60] if claim.effect else "TBD",
+                "confidence": claim.confidence.value.upper(),
+                "survived_challenge": "yes",
+                "status": status,
+                "sectors": [report.sector],
+            })
+
+    # Build agreed_findings with frontend-expected shape (claim + agreeing_agents)
+    agreed_findings_reshaped = [
+        {
+            "claim": {
+                "claim": a.finding,
+                "cause": "",
+                "effect": "",
+                "mechanism": "",
+                "confidence": a.confidence.value.upper(),
+                "evidence": [],
+                "assumptions": [],
+                "sensitivity": None,
+            },
+            "agreeing_agents": a.supporting_agents,
+        }
+        for a in agreed
+    ]
+
     # Build final report with frontend-expected shape
     report_data = {
         "policy_summary": policy_summary,
         "unified_impact": unified_impact_reshaped,
+        "impact_dashboard": impact_dashboard,
         "sankey_data": sankey.model_dump(),
         "disagreements": [d.model_dump() for d in disagreements],
-        "agreed_findings": [a.model_dump() for a in agreed],
+        "agreed_findings": agreed_findings_reshaped,
         "challenge_survival": challenge_survival_reshaped,
         "metadata": metadata,
     }

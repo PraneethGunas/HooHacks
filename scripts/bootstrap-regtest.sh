@@ -97,16 +97,23 @@ echo "[2/7] Funding buyer wallet..."
 BUYER_ADDR=$($LNCLI_BUYER newaddress p2wkh | jq -r '.address')
 echo "  Address: $BUYER_ADDR"
 
-echo "  Mining 101 blocks (coinbase maturity = 100)..."
-$BITCOIN_CLI generatetoaddress 101 "$BUYER_ADDR" > /dev/null
-sleep 2
+echo "  Mining 101 blocks in batches (coinbase maturity = 100)..."
+# Mine in small batches so litd wallet backend can keep up.
+# Mining all 101 at once causes "Block height out of range" — the wallet
+# can't index blocks fast enough and gets permanently stuck.
+for i in 1 2 3 4 5; do
+    $BITCOIN_CLI generatetoaddress 20 "$BUYER_ADDR" > /dev/null
+    sleep 2
+done
+$BITCOIN_CLI generatetoaddress 1 "$BUYER_ADDR" > /dev/null  # block 101
+sleep 3
 
 BUYER_BALANCE=$($LNCLI_BUYER walletbalance | jq -r '.confirmed_balance')
 echo "  Balance: $BUYER_BALANCE sats"
 
-# Wait for BOTH nodes to re-sync after mining 101 blocks
+# Wait for BOTH nodes to re-sync after mining blocks
 echo "  Waiting for nodes to sync new blocks..."
-SYNC_RETRIES=60
+SYNC_RETRIES=90
 while [ $SYNC_RETRIES -gt 0 ]; do
     BUYER_SYNCED=$($LNCLI_BUYER getinfo 2>/dev/null | jq -r '.synced_to_chain // "false"')
     SELLER_SYNCED=$($LNCLI_SELLER getinfo 2>/dev/null | jq -r '.synced_to_chain // "false"')
@@ -114,11 +121,16 @@ while [ $SYNC_RETRIES -gt 0 ]; do
         echo "  Both nodes synced to chain"
         break
     fi
+    if [ $((SYNC_RETRIES % 10)) -eq 0 ]; then
+        echo "  Still syncing... ($SYNC_RETRIES retries left, buyer=$BUYER_SYNCED seller=$SELLER_SYNCED)"
+    fi
     sleep 2
     SYNC_RETRIES=$((SYNC_RETRIES - 1))
 done
 if [ $SYNC_RETRIES -eq 0 ]; then
-    echo "  WARNING: Nodes may not be fully synced, continuing anyway..."
+    echo "  ERROR: Nodes failed to sync after 3 minutes. Aborting."
+    echo "  Check litd logs: docker compose logs litd-buyer"
+    exit 1
 fi
 echo ""
 

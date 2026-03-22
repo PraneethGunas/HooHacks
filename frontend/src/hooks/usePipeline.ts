@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { buildMockTimeline } from "@/lib/mockEvents";
-import type { PipelineEvent, PipelineState } from "@/types/pipeline";
+import type { PipelineEvent, PipelineState, ThinkingStep } from "@/types/pipeline";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const DEFAULT_AGENTS = ["Labor", "Consumer", "Business", "Housing"];
 
+let _thinkingIdCounter = 0;
+
 function buildInitialSectorAgents(): PipelineState["sectorAgents"] {
   return DEFAULT_AGENTS.reduce<PipelineState["sectorAgents"]>((acc, agent) => {
-    acc[agent] = { status: "pending", toolCalls: [], report: null };
+    acc[agent] = { status: "pending", toolCalls: [], report: null, agentMode: null, currentPhase: null, phaseLabel: null, thinkingSteps: [] };
     return acc;
   }, {});
 }
@@ -21,8 +23,6 @@ const initialState: PipelineState = {
   analystComplete: null,
   lightningPayments: [],
   sectorAgents: buildInitialSectorAgents(),
-  challenges: [],
-  rebuttals: [],
   synthesis: null,
   error: null,
 };
@@ -38,7 +38,7 @@ function setAgentStatus(
   agent: string,
   updater: (prev: PipelineState["sectorAgents"][string]) => PipelineState["sectorAgents"][string],
 ): PipelineState {
-  const prev = state.sectorAgents[agent] ?? { status: "pending" as const, toolCalls: [], report: null };
+  const prev = state.sectorAgents[agent] ?? { status: "pending" as const, toolCalls: [], report: null, agentMode: null, currentPhase: null, phaseLabel: null, thinkingSteps: [] };
   return {
     ...state,
     sectorAgents: {
@@ -59,23 +59,48 @@ function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
     case "lightning_payment":
       return { ...state, lightningPayments: [...state.lightningPayments, event.data] };
     case "sector_agent_started":
-      return setAgentStatus(state, event.data.agent, (prev) => ({ ...prev, status: "running" }));
-    case "sector_agent_tool_call":
+      return setAgentStatus(state, event.data.agent, (prev) => ({
+        ...prev,
+        status: "running",
+        agentMode: (event.data as any).agent_mode ?? prev.agentMode,
+      }));
+    case "sector_agent_tool_call": {
+      const d = event.data as any;
       return setAgentStatus(state, event.data.agent, (prev) => ({
         ...prev,
         status: "running",
         toolCalls: [...prev.toolCalls, event.data],
+        currentPhase: d.phase ?? prev.currentPhase,
+        phaseLabel: d.phase_detail ?? d.query ?? prev.phaseLabel,
       }));
+    }
     case "sector_agent_complete":
       return setAgentStatus(state, event.data.agent, (prev) => ({
         ...prev,
         status: "complete",
         report: event.data.report,
+        agentMode: (event.data as any).agent_mode ?? event.data.report?.agent_mode ?? prev.agentMode,
       }));
+    case "sector_agent_thinking": {
+      const td = event.data as any;
+      const step: ThinkingStep = {
+        id: ++_thinkingIdCounter,
+        stepType: td.step_type ?? "reasoning",
+        content: td.content ?? "",
+        phase: td.phase ?? "0",
+        tool: td.tool,
+        timestamp: Date.now(),
+      };
+      return setAgentStatus(state, td.agent, (prev) => ({
+        ...prev,
+        thinkingSteps: [...prev.thinkingSteps, step],
+        currentPhase: td.phase ?? prev.currentPhase,
+      }));
+    }
     case "debate_challenge":
-      return { ...state, challenges: [...state.challenges, event.data.challenge] };
     case "revision_complete":
-      return { ...state, rebuttals: [...state.rebuttals, event.data.rebuttal] };
+      // Debate removed — ignore legacy events gracefully
+      return state;
     case "synthesis_complete":
       return { ...state, status: "complete", synthesis: event.data.report };
     case "pipeline_complete":

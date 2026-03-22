@@ -35,8 +35,7 @@ This architecture is locked. All 7 agents, 5 stages, data schemas, and pipeline 
 | **Housing Agent** | Housing demand, rents, geographic mobility | 2 — Sector Analysis |
 | **Consumer Agent** | Price pass-through, purchasing power, spending | 2 — Sector Analysis |
 | **Business Agent** | Firm margins, closures, automation, regional disparities | 2 — Sector Analysis |
-| **Debate Agent** | Adversarially challenges weakest claims across all sector reports | 3 — Adversarial Review |
-| **Synthesis Agent** | Aggregates revised reports into unified output with Sankey flow data | 4 — Synthesis |
+| **Synthesis Agent** | Aggregates sector reports into unified output with Sankey flow data | 3 — Synthesis |
 
 ### Pipeline Flow
 
@@ -71,23 +70,9 @@ User Input: "Raise minimum wage to $15/hr"
                     │  4 SectorReports (structured JSON)
                     ▼
             ┌──────────────┐
-            │    DEBATE     │  Adversarial critic: targets weakest claims
-            │    AGENT      │  3-5 AgentChallenges
-            │   (Stage 3)   │
-            └──────┬───────┘
-                   │
-                   ▼
-            ┌──────────────┐
-            │   REVISION    │  Challenged agents respond:
-            │    ROUND      │  CONCEDE / DEFEND / REVISE
-            │  (Stage 3b)   │
-            └──────┬───────┘
-                   │
-                   ▼
-            ┌──────────────┐
             │  SYNTHESIS    │  Agreement map + Disagreement map
-            │    AGENT      │  + Challenge survival record
-            │   (Stage 4)   │  + Unified report + Sankey data
+            │    AGENT      │  + Unified report + Sankey data
+            │   (Stage 3)   │
             └──────┬───────┘
                    │
                    ▼
@@ -255,10 +240,6 @@ python3 test_classifier.py   # smoke test in project root
 |------|---------|
 | `calculate_elasticity` | Log-log regression for elasticity between two variables. Returns estimate, CI, R², p-value |
 | `run_scenario_analysis` | Given base value, shock %, and elasticity with uncertainty → base/bull/bear projections |
-
-### Debate Agent Tools
-
-`search_academic_papers`, `fetch_document_text`, `calculate_elasticity`
 
 ### Synthesis Agent Tools
 
@@ -540,8 +521,6 @@ The backend streams intermediate results so the user sees agents working in real
 | `sector_agent_tool_call` | Agent + tool + query | Per-agent live feed |
 | `sector_agent_complete` | SectorReport summary | Agent card fills with findings |
 | `lightning_payment` | Service + amount + status | Lightning bolt animation + sat counter |
-| `debate_challenge` | AgentChallenge | Challenge cards with red highlighting |
-| `revision_complete` | AgentRebuttal | Concede/defend/revise per challenge |
 | `synthesis_complete` | SynthesisReport + Sankey data | Final report + animated Sankey |
 
 ---
@@ -550,14 +529,13 @@ The backend streams intermediate results so the user sees agents working in real
 
 | Metric | Target |
 |--------|--------|
-| Total pipeline runtime | 30-60 seconds |
+| Total pipeline runtime | 20-45 seconds |
 | Stage 0 (Classifier, ADK) | ~2 seconds |
 | Stage 1 (Analyst) | 10-15 seconds |
 | Stage 2 (Sector Agents, parallel) | 8-12 seconds each |
-| Stage 3 (Debate + Revision) | 8-12 seconds |
-| Stage 4 (Synthesis) | 5-8 seconds |
+| Stage 3 (Synthesis) | 5-8 seconds |
 | Total API calls per run | 40-70 |
-| Total LLM calls per run | 15-25 |
+| Total LLM calls per run | 7-10 |
 
 ---
 
@@ -566,7 +544,7 @@ The backend streams intermediate results so the user sees agents working in real
 1. **Structured epistemic objects, not raw text.** Agents pass CausalClaims with confidence levels and assumptions — enabling formal interrogation.
 2. **Mandatory mechanism specification.** Agents cannot say "X leads to Y" without explaining HOW.
 3. **API-first data access.** Live government APIs (FRED, BLS, Census) for structured data.
-4. **Adversarial quality control.** Debate Agent stress-tests all claims. Surviving claims are marked as such.
+4. **Cross-sector synthesis.** Synthesis Agent identifies agreements, disagreements, and cross-sector dependencies.
 5. **Full audit trail.** Every tool call, claim, challenge, and rebuttal is logged and traceable.
 
 ---

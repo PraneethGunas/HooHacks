@@ -77,20 +77,25 @@ SECTOR_TOOLS: dict[str, dict[str, list[dict[str, Any]]]] = {
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "MORTGAGE30US"}, "label": "30-year mortgage rate"},
             {"tool": "fred_get_series", "args": {"series_id": "RRVRUSQ156N"}, "label": "Rental vacancy rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25064_001E"], "geography": "state:*"}, "label": "Census ACS: median gross rent by state"},
+            {"tool": "hud_data", "args": {"dataset": "fmr", "entity_id": "VA"}, "label": "HUD Fair Market Rents (Virginia)"},
         ],
         "immigration": [
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "RRVRUSQ156N"}, "label": "Rental vacancy rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25064_001E", "B25077_001E"], "geography": "state:*"}, "label": "Census ACS: median rent & home value by state"},
             {"tool": "scenario", "args": {"variable": "rent_index", "baseline": 100.0, "shock": -2.0, "elasticity": 0.4}, "label": "H1B restriction → rental demand scenario"},
         ],
         "student_loan": [
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
             {"tool": "fred_get_series", "args": {"series_id": "MORTGAGE30US"}, "label": "30-year mortgage rate"},
+            {"tool": "census_acs_query", "args": {"table_variables": ["B25077_001E"], "geography": "state:*"}, "label": "Census ACS: median home value by state"},
             {"tool": "scenario", "args": {"variable": "first_time_buyers", "baseline": 26.0, "shock": 15.0, "elasticity": 0.25}, "label": "Loan forgiveness → first-time buyer share scenario"},
         ],
         "tariff": [
             {"tool": "fred_get_series", "args": {"series_id": "WPUSI012011"}, "label": "PPI: construction materials"},
             {"tool": "fred_get_series", "args": {"series_id": "MSPUS"}, "label": "Median home sales price"},
+            {"tool": "hud_data", "args": {"dataset": "fmr", "entity_id": "VA"}, "label": "HUD Fair Market Rents (Virginia)"},
             {"tool": "scenario", "args": {"variable": "construction_costs", "baseline": 100.0, "shock": 8.0, "elasticity": 0.6}, "label": "Tariff → construction cost scenario"},
         ],
     },
@@ -205,6 +210,26 @@ async def _execute_tool(
                 elasticity=args["elasticity"],
             )
             return {"tool": "run_scenario_analysis", "label": label, "data": result.to_dict()}
+
+        elif tool_name == "census_acs_query":
+            from backend.tools.census_acs_query import census_acs_query
+            result = await census_acs_query(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "bea_regional_data":
+            from backend.tools.bea_regional_data import bea_regional_data
+            result = await bea_regional_data(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "hud_data":
+            from backend.tools.hud_data import hud_data
+            result = await hud_data(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
+
+        elif tool_name == "code_execute":
+            from backend.tools.code_execute import code_execute
+            result = await code_execute(**args)
+            return {"tool": tool_name, "label": label, "data": result.model_dump()}
 
         else:
             return {"tool": tool_name, "label": label, "data": {"error": f"unknown tool: {tool_name}"}}
@@ -362,8 +387,21 @@ def _fallback_report(sector: str, state: PipelineState) -> SectorReport:
     )
 
 
-def _normalize_confidence(raw_value: str) -> ConfidenceLevel:
-    """Map LLM confidence strings to our enum, handling creative LLM outputs."""
+def _normalize_confidence(raw_value: Any) -> ConfidenceLevel:
+    """Map LLM confidence strings/numbers to our enum, handling creative LLM outputs."""
+    # Handle numeric confidence (e.g. 0.8, 85, 0.3)
+    if isinstance(raw_value, (int, float)):
+        if raw_value > 1:
+            raw_value = raw_value / 100  # treat 85 as 0.85
+        if raw_value >= 0.7:
+            return ConfidenceLevel.EMPIRICAL
+        if raw_value >= 0.4:
+            return ConfidenceLevel.THEORETICAL
+        return ConfidenceLevel.SPECULATIVE
+
+    if not isinstance(raw_value, str):
+        return ConfidenceLevel.THEORETICAL
+
     v = raw_value.lower().strip()
     try:
         return ConfidenceLevel(v)
@@ -386,6 +424,21 @@ def _parse_sector_report(sector: str, raw: str, tool_records: list[ToolCallRecor
         logger.error(f"Sector {sector}: JSON parse failed: {e}, raw[:500]={raw[:500]}")
         return SectorReport(sector=sector)
 
+    # Gemini sometimes wraps the entire response in an array: [{...}]
+    # Unwrap to get the dict inside
+    if isinstance(data, list):
+        logger.warning(f"Sector {sector}: parse_json_response returned a list (len={len(data)}), unwrapping")
+        dicts = [item for item in data if isinstance(item, dict)]
+        if dicts:
+            data = dicts[0]
+        else:
+            logger.error(f"Sector {sector}: list contained no dicts, raw[:500]={raw[:500]}")
+            return SectorReport(sector=sector)
+
+    if not isinstance(data, dict):
+        logger.error(f"Sector {sector}: parsed data is {type(data).__name__}, not dict. raw[:500]={raw[:500]}")
+        return SectorReport(sector=sector)
+
     def _to_list(val: Any) -> list[str]:
         if isinstance(val, list):
             return [str(v) for v in val]
@@ -393,7 +446,16 @@ def _parse_sector_report(sector: str, raw: str, tool_records: list[ToolCallRecor
             return [val]
         return []
 
-    def _parse_claim(c: dict) -> CausalClaim:
+    def _parse_claim(c: Any) -> CausalClaim | None:
+        # If LLM returned a list instead of a dict, try to use the first dict element
+        if isinstance(c, list):
+            dicts = [item for item in c if isinstance(item, dict)]
+            if dicts:
+                c = dicts[0]
+            else:
+                return None
+        if not isinstance(c, dict):
+            return None
         return CausalClaim(
             claim=c.get("claim", ""),
             cause=c.get("cause", ""),
@@ -405,29 +467,46 @@ def _parse_sector_report(sector: str, raw: str, tool_records: list[ToolCallRecor
             sensitivity=c.get("sensitivity"),
         )
 
+    def _parse_claims(raw_list: Any) -> list[CausalClaim]:
+        """Parse a list of claims, handling nested lists and non-dict items."""
+        if not isinstance(raw_list, list):
+            return []
+        # Flatten one level of nesting: [[{...}, {...}]] → [{...}, {...}]
+        flat: list[Any] = []
+        for item in raw_list:
+            if isinstance(item, list):
+                flat.extend(item)
+            else:
+                flat.append(item)
+        return [claim for c in flat if (claim := _parse_claim(c)) is not None]
+
     return SectorReport(
         sector=sector,
-        direct_effects=[_parse_claim(c) for c in data.get("direct_effects", [])],
-        second_order_effects=[_parse_claim(c) for c in data.get("second_order_effects", [])],
-        feedback_loops=[_parse_claim(c) for c in data.get("feedback_loops", [])],
+        direct_effects=_parse_claims(data.get("direct_effects", [])),
+        second_order_effects=_parse_claims(data.get("second_order_effects", [])),
+        feedback_loops=_parse_claims(data.get("feedback_loops", [])),
         cross_sector_dependencies=data.get("cross_sector_dependencies", []),
         dissent=data.get("dissent"),
         tool_calls_made=tool_records or [],
     )
 
 
-async def _run_one_sector(
+async def _run_one_sector_single_shot(
     sector: str,
     state: PipelineState,
     emit: EventCallback,
 ) -> SectorReport:
-    """Run a single sector agent: tool calls → LLM analysis."""
+    """Run a single sector agent via single-shot: tool calls → LLM analysis.
+
+    Used for labor and business (no LangGraph agent yet).
+    """
     await emit({
         "type": "sector_agent_started",
         "agent": sector,
         "data": {
             "sector": sector,
             "agent": sector.title(),
+            "agent_mode": "single_shot",
         },
     })
 
@@ -482,38 +561,327 @@ async def _run_one_sector(
         logger.error(f"Sector {sector} LLM failed: {traceback.format_exc()}")
         report = _fallback_report(sector, state)
 
-    # Emit completion
+    report.agent_mode = "single_shot"
+    return report
+
+
+# Phase descriptions for SSE events — maps LangGraph node names to human-readable labels
+HOUSING_PHASES: dict[str, dict[str, str]] = {
+    "phase_1_pathways":      {"phase": "1", "label": "Identifying transmission pathways",      "detail": "Reasoning about how policy connects to housing"},
+    "phase_2_baseline":      {"phase": "2", "label": "Gathering housing market baseline",      "detail": "Pulling FRED, BLS, Census, HUD data"},
+    "phase_3_magnitudes":    {"phase": "3", "label": "Estimating impact magnitudes",           "detail": "Running elasticity + scenario models"},
+    "phase_4_distributional":{"phase": "4", "label": "Distributional & temporal analysis",     "detail": "Who wins, who loses, and when"},
+    "phase_5_scorecard":     {"phase": "5", "label": "Building affordability scorecard",       "detail": "Final housing report with sub-market impacts"},
+}
+
+CONSUMER_PHASES: dict[str, dict[str, str]] = {
+    "phase_1_shock":           {"phase": "1", "label": "Identifying price shock entry points", "detail": "Where does the cost shock enter the economy?"},
+    "phase_2_passthrough":     {"phase": "2", "label": "Estimating pass-through rates",        "detail": "Pulling CPI, PPI data + market structure analysis"},
+    "phase_3_geo_behavioral":  {"phase": "3", "label": "Geographic & behavioral analysis",     "detail": "Regional price impacts + substitution patterns"},
+    "phase_4_purchasing_power":{"phase": "4", "label": "Net purchasing power calculation",     "detail": "Income gains vs cost increases per household type"},
+    "phase_5_scorecard":       {"phase": "5", "label": "Building consumer impact scorecard",   "detail": "Final consumer report with household-level impacts"},
+}
+
+
+async def _run_langgraph_sector(
+    sector: str,
+    state: PipelineState,
+    emit: EventCallback,
+) -> SectorReport:
+    """Run a LangGraph multi-phase sector agent (housing or consumer).
+
+    Uses graph.astream() to emit real-time SSE events after each phase completes,
+    so the frontend shows live progress.
+
+    Falls back to single-shot if the LangGraph agent fails to import or errors out.
+    """
+    from backend.pipeline.langgraph_adapter import (
+        briefing_dict_to_analyst_briefing,
+        housing_report_to_sector_report,
+        consumer_report_to_sector_report,
+    )
+
+    await emit({
+        "type": "sector_agent_started",
+        "agent": sector,
+        "data": {
+            "sector": sector,
+            "agent": sector.title(),
+            "agent_mode": "agentic",
+        },
+    })
+
+    try:
+        # Bridge pipeline briefing dict → AnalystBriefing Pydantic model
+        analyst_briefing = briefing_dict_to_analyst_briefing(state.briefing)
+        logger.info(f"Sector {sector}: ✅ AnalystBriefing bridge built successfully")
+
+        policy_query = state.query
+        if analyst_briefing.policy_spec:
+            policy_query = f"{analyst_briefing.policy_spec.action}: {analyst_briefing.policy_spec.value}"
+
+        # Build graph and initial state based on sector
+        if sector == "housing":
+            from backend.agents.housing.graph import build_housing_graph
+            from backend.agents.housing.schemas import HousingState
+            logger.info(f"Sector {sector}: ✅ LangGraph housing imports succeeded")
+
+            graph = build_housing_graph()
+            phase_map = HOUSING_PHASES
+            convert_fn = housing_report_to_sector_report
+            initial: dict = {
+                "analyst_briefing": analyst_briefing,
+                "policy_query": policy_query,
+                "current_phase": 1,
+                "phase_1_output": None,
+                "phase_2_output": None,
+                "phase_3_output": None,
+                "phase_4_output": None,
+                "phase_5_output": None,
+                "tool_call_log": [],
+            }
+
+        elif sector == "consumer":
+            from backend.agents.consumer.graph import build_consumer_graph
+            from backend.agents.consumer.schemas import ConsumerState
+            logger.info(f"Sector {sector}: ✅ LangGraph consumer imports succeeded")
+
+            graph = build_consumer_graph()
+            phase_map = CONSUMER_PHASES
+            convert_fn = consumer_report_to_sector_report
+            initial: dict = {
+                "analyst_briefing": analyst_briefing,
+                "policy_query": policy_query,
+                "current_phase": 1,
+                "phase_1_output": None,
+                "phase_2_output": None,
+                "phase_3_output": None,
+                "phase_4_output": None,
+                "phase_5_output": None,
+                "tool_call_log": [],
+            }
+        else:
+            return await _run_one_sector_single_shot(sector, state, emit)
+
+        # --- Stream the graph with astream_events for real-time thinking feed ---
+        logger.info(f"Sector {sector}: 🚀 STARTING LangGraph 5-phase agent (agentic mode)")
+
+        async def _emit_thinking(step_type: str, content: str, **extra: Any) -> None:
+            """Emit a thinking step to the frontend feed."""
+            await emit({
+                "type": "sector_agent_thinking",
+                "agent": sector,
+                "data": {
+                    "agent": sector.title(),
+                    "step_type": step_type,
+                    "content": content,
+                    **extra,
+                },
+            })
+
+        await _emit_thinking("phase_start", "Starting 5-phase agentic pipeline", phase="0")
+
+        final_state = {}
+        current_phase = "1"
+        seen_tool_ids: set[str] = set()
+
+        try:
+            async for event in graph.astream_events(initial, version="v2"):
+                kind = event.get("event", "")
+                name = event.get("name", "")
+                run_id = event.get("run_id", "")
+
+                # --- Phase node starts ---
+                if kind == "on_chain_start" and name in phase_map:
+                    phase_info = phase_map[name]
+                    current_phase = phase_info["phase"]
+                    logger.info(f"Sector {sector}: Phase {current_phase} starting — {phase_info['label']}")
+
+                    await emit({
+                        "type": "sector_agent_tool_call",
+                        "agent": sector,
+                        "data": {
+                            "agent": sector.title(),
+                            "tool": f"phase_{current_phase}",
+                            "query": phase_info["label"],
+                            "phase": current_phase,
+                            "phase_detail": phase_info["detail"],
+                        },
+                    })
+                    await _emit_thinking("phase_start", phase_info["detail"], phase=current_phase)
+
+                # --- Phase node completes ---
+                elif kind == "on_chain_end" and name in phase_map:
+                    phase_info = phase_map[name]
+                    output = event.get("data", {}).get("output", {})
+                    if isinstance(output, dict):
+                        final_state.update(output)
+                    logger.info(f"Sector {sector}: Phase {phase_info['phase']} ✅ complete")
+                    await _emit_thinking("phase_complete", f"Phase {phase_info['phase']} complete: {phase_info['label']}", phase=phase_info["phase"])
+
+                # --- Tool invocation starts ---
+                elif kind == "on_tool_start":
+                    tool_input = event.get("data", {}).get("input", {})
+                    tool_id = f"{run_id}:{name}"
+                    if tool_id not in seen_tool_ids:
+                        seen_tool_ids.add(tool_id)
+                        # Format tool args for display
+                        if isinstance(tool_input, dict):
+                            args_str = ", ".join(f"{k}={v}" for k, v in list(tool_input.items())[:3])
+                        else:
+                            args_str = str(tool_input)[:100]
+                        await _emit_thinking("tool_call", f"Calling {name}({args_str})", phase=current_phase, tool=name)
+
+                # --- Tool invocation completes ---
+                elif kind == "on_tool_end":
+                    tool_output = event.get("data", {}).get("output", "")
+                    output_str = str(tool_output)[:150] if tool_output else "no data"
+                    await _emit_thinking("tool_result", f"{name} → {output_str}", phase=current_phase, tool=name)
+
+                # --- LLM starts generating ---
+                elif kind == "on_chat_model_start":
+                    await _emit_thinking("reasoning", "Analyzing data and forming conclusions...", phase=current_phase)
+
+                # --- LLM streaming tokens (first chunk = "thinking started") ---
+                elif kind == "on_chat_model_stream":
+                    # We don't stream every token (too noisy for SSE).
+                    # But we capture the first ~200 chars of content for a thinking preview.
+                    chunk_content = event.get("data", {})
+                    if hasattr(chunk_content, "content") and chunk_content.content:
+                        text = chunk_content.content if isinstance(chunk_content.content, str) else str(chunk_content.content)
+                        # Only emit substantial chunks (not individual tokens)
+                        if len(text) > 30:
+                            await _emit_thinking("reasoning_chunk", text[:200], phase=current_phase)
+
+        except Exception as stream_err:
+            # astream_events failed — fall back to regular astream
+            logger.warning(
+                f"Sector {sector}: astream_events failed ({stream_err}), falling back to astream"
+            )
+            await _emit_thinking("reasoning", "Switching to batch processing mode...", phase=current_phase)
+
+            async for chunk in graph.astream(initial):
+                for node_name, node_output in chunk.items():
+                    final_state.update(node_output)
+                    phase_info = phase_map.get(node_name)
+                    if phase_info:
+                        current_phase = phase_info["phase"]
+                        await emit({
+                            "type": "sector_agent_tool_call",
+                            "agent": sector,
+                            "data": {
+                                "agent": sector.title(),
+                                "tool": f"phase_{current_phase}",
+                                "query": phase_info["label"],
+                                "phase": current_phase,
+                                "phase_detail": phase_info["detail"],
+                            },
+                        })
+                        await _emit_thinking("phase_complete", phase_info["label"], phase=current_phase)
+
+        # Extract the final report from phase 5
+        final_report = final_state.get("phase_5_output")
+        if final_report is None:
+            error_msg = "LangGraph produced no phase_5_output after all 5 phases"
+            logger.error(f"Sector {sector}: ❌ {error_msg}")
+            await emit({
+                "type": "sector_agent_tool_call",
+                "agent": sector,
+                "data": {
+                    "agent": sector.title(),
+                    "tool": "langgraph_fallback",
+                    "query": f"⚠️ FALLING BACK to single-shot: {error_msg}",
+                },
+            })
+            fallback = await _run_one_sector_single_shot(sector, state, emit)
+            fallback.agent_mode = "single_shot"
+            return fallback
+
+        all_tool_records = final_state.get("tool_call_log", [])
+        logger.info(f"Sector {sector}: ✅ LangGraph complete with {len(all_tool_records)} tool calls")
+
+        report = convert_fn(final_report, all_tool_records)
+        logger.info(
+            f"Sector {sector}: ✅ AGENTIC FLOW SUCCESS — "
+            f"{len(report.direct_effects)} direct, "
+            f"{len(report.second_order_effects)} second-order, "
+            f"{len(all_tool_records)} tool calls"
+        )
+        return report
+
+    except Exception:
+        error_msg = traceback.format_exc()
+        logger.error(
+            f"Sector {sector}: ❌ LANGGRAPH AGENT FAILED — falling back to single-shot:\n"
+            f"{error_msg}"
+        )
+        await emit({
+            "type": "sector_agent_tool_call",
+            "agent": sector,
+            "data": {
+                "agent": sector.title(),
+                "tool": "langgraph_fallback",
+                "query": f"⚠️ FALLING BACK to single-shot: {error_msg[:200]}",
+            },
+        })
+        fallback = await _run_one_sector_single_shot(sector, state, emit)
+        fallback.agent_mode = "single_shot"
+        return fallback
+
+
+# Sectors that have full LangGraph agents (Rudra's implementation)
+LANGGRAPH_SECTORS = {"housing", "consumer"}
+
+
+async def _emit_sector_complete(sector: str, report: SectorReport, emit: EventCallback) -> None:
+    """Emit the sector_agent_complete SSE event with properly formatted report data."""
+    report_dict = report.model_dump()
+    for claim_list_key in ("direct_effects", "second_order_effects", "feedback_loops"):
+        for claim_dict in report_dict.get(claim_list_key, []):
+            if "confidence" in claim_dict:
+                claim_dict["confidence"] = claim_dict["confidence"].upper()
+
     await emit({
         "type": "sector_agent_complete",
         "agent": sector,
         "data": {
             "agent": sector.title(),
-            "report": report.model_dump(),
+            "report": report_dict,
             "sector": sector,
+            "agent_mode": report.agent_mode,
             "direct_effects": len(report.direct_effects),
             "second_order_effects": len(report.second_order_effects),
             "feedback_loops": len(report.feedback_loops),
             "has_dissent": report.dissent is not None,
-            "tool_calls": len(tool_records),
+            "tool_calls": len(report.tool_calls_made),
         },
     })
 
-    return report
-
 
 async def run_sector_agents(state: PipelineState, emit: EventCallback) -> PipelineState:
-    """Stage 2: Run all 4 sector agents in parallel."""
-    tasks = [
-        _run_one_sector(sector, state, emit)
-        for sector in SECTORS
-    ]
+    """Stage 2: Run all 4 sector agents in parallel.
+
+    Housing and Consumer use Rudra's LangGraph multi-phase agents.
+    Labor and Business use single-shot LLM analysis (fallback).
+    """
+    async def _run_sector(sector: str) -> SectorReport:
+        if sector in LANGGRAPH_SECTORS:
+            report = await _run_langgraph_sector(sector, state, emit)
+        else:
+            report = await _run_one_sector_single_shot(sector, state, emit)
+        await _emit_sector_complete(sector, report, emit)
+        return report
+
+    tasks = [_run_sector(sector) for sector in SECTORS]
     reports = await asyncio.gather(*tasks, return_exceptions=True)
 
     state.sector_reports = []
     for sector, result in zip(SECTORS, reports):
         if isinstance(result, Exception):
             logger.error(f"Sector {sector} failed: {result}")
-            state.sector_reports.append(_fallback_report(sector, state))
+            fallback = _fallback_report(sector, state)
+            fallback.agent_mode = "single_shot"
+            state.sector_reports.append(fallback)
         else:
             state.sector_reports.append(result)
 

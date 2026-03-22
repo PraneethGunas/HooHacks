@@ -22,6 +22,13 @@ async def bea_regional_data(
         year: Year or "LAST5" for latest 5 years.
         line_code: Line code within the table (varies by table).
     """
+    if not settings.bea_data_api:
+        return BEARegionalOutput(
+            table_name=table_name,
+            geo_fips=geo_fips,
+            data=[BEADataPoint(value="ERROR: BEA_DATA_API key not configured. Set it in .env.")],
+        )
+
     params = {
         "UserID": settings.bea_data_api,
         "method": "GetData",

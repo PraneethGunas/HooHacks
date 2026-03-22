@@ -29,8 +29,10 @@ async def census_acs_query(
     params: dict = {
         "get": ",".join(get_vars),
         "for": geography,
-        "key": settings.census_api_key,
     }
+    # Census API works without a key (rate-limited). Only send key if configured.
+    if settings.census_api_key:
+        params["key"] = settings.census_api_key
     # Only add state filter for sub-state geographies (county, tract, etc.)
     # Skip for state-level, national, or when state_fips is empty
     skip_state_filter = (

@@ -35,9 +35,9 @@ class ClassifierOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ConfidenceLevel(str, Enum):
-    EMPIRICAL = "EMPIRICAL"
-    THEORETICAL = "THEORETICAL"
-    SPECULATIVE = "SPECULATIVE"
+    EMPIRICAL = "empirical"
+    THEORETICAL = "theoretical"
+    SPECULATIVE = "speculative"
 
 
 # ---------------------------------------------------------------------------

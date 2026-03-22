@@ -32,6 +32,8 @@ services:
       - "8000:8000"
     volumes:
       - ../backend:/app/backend
+    env_file:
+      - ../.env
     environment:
       <<: *backend-env
       ENVIRONMENT: ${ENVIRONMENT:-development}

@@ -16,7 +16,9 @@ function BoltIcon() {
 }
 
 export default function QueryInput({ onSubmit }: QueryInputProps) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(
+    "Implement a 30% corporate tax increase on tech companies with revenue over $50B",
+  );
   const canRun = query.trim().length > 0;
 
   const submit = () => {
@@ -27,7 +29,13 @@ export default function QueryInput({ onSubmit }: QueryInputProps) {
   };
 
   return (
-    <section className="min-h-screen w-full grid place-items-center px-4 py-10 sm:px-8 sm:py-12">
+    <section className="relative min-h-screen w-full grid place-items-center px-4 py-10 sm:px-8 sm:py-12">
+      <div className="pointer-events-none absolute left-6 top-8 hidden rounded-full border border-[var(--fun-cyan)]/40 bg-[var(--fun-cyan)]/10 px-3 py-1 text-xs text-[var(--fun-cyan)] md:block">
+        Simulation Mode
+      </div>
+      <div className="pointer-events-none absolute right-6 top-8 hidden rounded-full border border-[var(--fun-pink)]/35 bg-[var(--fun-pink)]/10 px-3 py-1 text-xs text-[var(--fun-pink)] md:block">
+        7 Agents • &gt;$50B Focus
+      </div>
       <div className="mx-auto w-full max-w-3xl enter-card text-center">
         <div className="mb-8 flex items-center justify-center gap-3 text-base font-medium text-white/80">
           <span className="text-[var(--accent-gold)]">
@@ -39,13 +47,17 @@ export default function QueryInput({ onSubmit }: QueryInputProps) {
         </div>
 
         <p className="text-base leading-7 font-medium text-white/80">
-          PolicyPulse is a multi-agent economic policy simulator that evaluates real-world policy ideas using staged analysis.
-          It runs a live pipeline and returns a structured impact report with explainable reasoning and visual flows.
+          PolicyPulse is running a full workflow simulation from classifier to analyst, through parallel sector agents, then debate,
+          revisions, and synthesis. Run the scenario and watch the agents negotiate assumptions in real time.
         </p>
 
-        <div className="mt-10 text-sm font-medium text-[var(--accent-gold)]/90">Write a policy prompt to start the simulation.</div>
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-2 text-[11px]">
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">Stage 0: Classifier</span>
+          <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sky-300">Stage 1-2: Parallel Agent Analysis</span>
+          <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-rose-300">Stage 3-4: Debate + Report</span>
+        </div>
 
-        <div className="mt-5 rounded-lg border border-white/10 bg-black/20 p-3 text-left">
+        <div className="mt-5 rounded-2xl border border-white/15 glass-card p-3 text-left shadow-[0_8px_30px_rgba(0,0,0,0.28)]">
           <textarea
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -58,12 +70,12 @@ export default function QueryInput({ onSubmit }: QueryInputProps) {
           onClick={submit}
           disabled={!canRun}
           className={cn(
-            "mt-5 mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-lg bg-[#F0EEE8] px-4 py-2.5 text-md text-[#0A0C0F] transition",
+            "mt-5 mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#ffe4a6] via-[#ffd06e] to-[#ffb870] px-4 py-2.5 text-md text-[#101319] shadow-[0_8px_20px_rgba(245,158,11,0.25)] transition",
             canRun ? "hover:brightness-95" : "cursor-not-allowed opacity-40",
           )}
         >
           <BoltIcon />
-          Run analysis
+          Launch workflow simulation
         </button>
       </div>
     </section>

@@ -45,6 +45,14 @@ async def hud_data(
             data={"error": f"Unknown dataset: {dataset}. Use 'fmr', 'il', or 'usps'."},
         )
 
+    # HUD API requires a Bearer token — skip gracefully if not configured
+    if not settings.hud_data_api:
+        return HUDDataOutput(
+            dataset=dataset,
+            entity_id=entity_id,
+            data={"error": "HUD_DATA_API key not configured. Set it in .env to enable HUD queries."},
+        )
+
     headers = {"Authorization": f"Bearer {settings.hud_data_api}"}
 
     # USPS has query params

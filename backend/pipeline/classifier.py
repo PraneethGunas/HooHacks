@@ -153,6 +153,7 @@ async def run_classifier(state: PipelineState, emit: EventCallback) -> PipelineS
         "task_type": result.get("policy_type", "other"),
         "policy_params": {
             "jurisdiction": "US",  # Default to US if not specified
+            "scope": result.get("policy_name", "Federal policy"),
             **result.get("parameters", {}),
         },
         "affected_sectors": ["labor", "housing", "consumer", "business"],

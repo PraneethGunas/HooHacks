@@ -31,17 +31,13 @@ pytest-asyncio>=0.23,<1.0
 # requests>=2.31.0
 # beautifulsoup4>=4.12.0
 
-# LLM SDKs (uncomment as needed)
-# openai>=1.14.0
-# google-generativeai>=0.4.0
-# anthropic>=0.21.0
-# langgraph>=0.4.0
-# langchain-core>=0.3.0
-# langchain-google-genai>=2.0
+# LLM SDKs
+openai>=1.14.0
+google-generativeai>=0.4.0
+anthropic>=0.21.0
 
-# Stage 0 Classifier — Google ADK (SZNS Solutions sponsor track)
+# Agent orchestration (LangGraph + LangChain for housing agent, ADK for classifier)
 google-adk>=0.3.0
-
-# LangGraph (Rudra's agent orchestration)
-# langgraph>=0.0.30
-# langchain-core>=0.1.30
+langgraph>=0.4.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0

@@ -81,6 +81,7 @@ class SectorReport(BaseModel):
     cross_sector_dependencies: list[str] = Field(default_factory=list)
     dissent: str | None = None
     tool_calls_made: list[ToolCallRecord] = Field(default_factory=list)
+    agent_mode: str = Field(default="single_shot", description="'agentic' (LangGraph multi-phase) or 'single_shot' (one-pass LLM)")
 
 
 class AgentChallenge(BaseModel):

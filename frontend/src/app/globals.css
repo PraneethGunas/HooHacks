@@ -20,6 +20,8 @@
   --amber-speculative: #fbbf24;
   --red-debate: #f87171;
   --red-dim: #7f1d1d;
+  --fun-cyan: #4dd9ff;
+  --fun-azure: #60a5fa;
 }
 
 @theme inline {
@@ -31,10 +33,80 @@
   border-color: var(--border-default);
 }
 
+html,
 body {
-  background: radial-gradient(circle at 10% 0%, rgba(245, 158, 11, 0.08) 0%, transparent 32%),
-    radial-gradient(circle at 100% 100%, rgba(96, 165, 250, 0.07) 0%, transparent 28%), var(--bg-primary);
+  min-height: 100%;
+}
+
+body {
+  background: #090c11;
   color: var(--text-primary);
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 18% 20%, rgba(245, 158, 11, 0.28) 0%, rgba(245, 158, 11, 0.1) 6%, transparent 14%),
+    radial-gradient(circle at 28% 68%, rgba(77, 217, 255, 0.22) 0%, rgba(77, 217, 255, 0.08) 7%, transparent 15%),
+    radial-gradient(circle at 46% 30%, rgba(96, 165, 250, 0.2) 0%, rgba(96, 165, 250, 0.08) 6%, transparent 13%),
+    radial-gradient(ellipse 38% 30% at 99% 56%, rgba(59, 130, 246, 0.28) 0%, rgba(59, 130, 246, 0.14) 22%, transparent 58%),
+    linear-gradient(155deg, #06080d 0%, #0a0f17 52%, #090d14 100%);
+  background-size: 135% 135%, 145% 145%, 130% 130%, 180% 180%, cover;
+  background-repeat: no-repeat;
+  filter: blur(1px) brightness(1);
+  animation: ambientShift 16s ease-in-out infinite alternate, ambientPulse 4.4s ease-in-out infinite, bokehBreath 8.5s ease-in-out infinite;
+}
+
+body::after {
+  background:
+    radial-gradient(circle at 14% 78%, rgba(77, 217, 255, 0.2) 0%, rgba(77, 217, 255, 0.08) 6%, transparent 14%),
+    radial-gradient(circle at 38% 56%, rgba(245, 158, 11, 0.16) 0%, rgba(245, 158, 11, 0.06) 5%, transparent 13%),
+    radial-gradient(ellipse 30% 24% at 98% 34%, rgba(96, 165, 250, 0.26) 0%, rgba(96, 165, 250, 0.11) 20%, transparent 56%);
+  filter: blur(26px);
+  animation: floatBlob 11s ease-in-out infinite alternate, ambientPulse 5.2s ease-in-out infinite reverse;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+body::selection {
+  background: rgba(77, 217, 255, 0.25);
+}
+
+body::before {
+  will-change: background-position, filter;
+}
+
+body::after {
+  will-change: transform, filter;
+}
+
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, 0.07) 0%, transparent 8%),
+    radial-gradient(circle at 34% 72%, rgba(255, 255, 255, 0.05) 0%, transparent 7%),
+    radial-gradient(circle at 56% 36%, rgba(255, 255, 255, 0.04) 0%, transparent 6%);
+  filter: blur(18px);
+  animation: ambientPulse 6.4s ease-in-out infinite;
 }
 
 @keyframes slideFadeIn {
@@ -82,6 +154,57 @@ body {
   }
 }
 
+@keyframes floatBlob {
+  0%,
+  100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-12px) scale(1.06);
+  }
+}
+
+@keyframes sparkle {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes ambientShift {
+  0% {
+    background-position: 0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%;
+  }
+  100% {
+    background-position: 5% -4%, -4% 6%, 4% -5%, -3% 3%, 0% 0%;
+  }
+}
+
+@keyframes ambientPulse {
+  0%,
+  100% {
+    filter: brightness(0.98) saturate(0.98);
+  }
+  50% {
+    filter: brightness(1.16) saturate(1.14);
+  }
+}
+
+@keyframes bokehBreath {
+  0%,
+  100% {
+    background-size: 135% 135%, 145% 145%, 130% 130%, 154% 154%, cover;
+  }
+  50% {
+    background-size: 135% 135%, 145% 145%, 130% 130%, 178% 166%, cover;
+  }
+}
+
 .enter-card {
   animation: slideFadeIn 300ms ease-out;
 }
@@ -106,4 +229,22 @@ body {
   background: linear-gradient(90deg, transparent 0%, rgba(245, 158, 11, 0.9) 50%, transparent 100%);
   width: 40%;
   animation: indeterminateBar 1.25s ease-in-out infinite;
+}
+
+.sparkle-dot {
+  animation: sparkle 1.6s ease-in-out infinite;
+}
+
+.glass-card {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  backdrop-filter: blur(10px);
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

@@ -1,5 +1,5 @@
 """
-Pipeline orchestrator — runs all 5 stages and streams SSE events.
+Pipeline orchestrator — runs all stages and streams SSE events.
 
 ===========================================================================
 INTEGRATION GUIDE
@@ -10,8 +10,7 @@ This orchestrator runs each pipeline stage sequentially:
   Stage 1: Analyst       — gather baseline data from public APIs
   Stage 1.5: Premium     — L402 Lightning payments for gated data (🟢 REAL)
   Stage 2: Sector Agents — 4 parallel LLM analyses (labor, housing, consumer, business)
-  Stage 3: Debate        — adversarial challenge of weakest claims
-  Stage 4: Synthesis     — aggregate into final report + Sankey data
+  Stage 3: Synthesis     — aggregate into final report + Sankey data
 
 CURRENT STATUS:
   - Stages use LLM (Google Gemini / OpenAI / Anthropic) when API keys are set
@@ -35,10 +34,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 from backend.models.pipeline import (
-    SectorReport,
-    SynthesisReport,
     AgentChallenge,
     AgentRebuttal,
+    SectorReport,
+    SynthesisReport,
 )
 
 
@@ -68,11 +67,11 @@ class PipelineState:
     # Stage 2 output
     sector_reports: list[SectorReport] = field(default_factory=list)
 
-    # Stage 3 output
+    # Stage 3 output (debate)
     challenges: list[AgentChallenge] = field(default_factory=list)
     rebuttals: list[AgentRebuttal] = field(default_factory=list)
 
-    # Stage 4 output
+    # Stage 4 output (synthesis)
     synthesis: SynthesisReport | None = None
 
     # Timing
@@ -135,7 +134,7 @@ async def run_pipeline(
         state = await run_sector_agents(state, _emit)
         state.stage_times["sector"] = time.time() - t2
 
-        # Stage 3: Debate
+        # Stage 3: Debate (adversarial challenge + rebuttal)
         t3 = time.time()
         state = await run_debate(state, _emit)
         state.stage_times["debate"] = time.time() - t3

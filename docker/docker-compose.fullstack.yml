@@ -147,6 +147,8 @@ services:
       - ../backend:/app/backend
       - lnget-config:/root/.lnget
       - litd-buyer-data:/root/.lnd:ro
+    env_file:
+      - ../.env
     environment:
       <<: *backend-env
       APERTURE_URL: http://aperture:8081
