@@ -123,6 +123,19 @@ async def _run_langgraph_synthesis(state: PipelineState, emit: EventCallback) ->
     current_phase = 0
     phase_start_times: dict[int, float] = {}
 
+    async def _think(step_type: str, content: str, phase: int, tool: str | None = None) -> None:
+        """Emit a thinking event for the synthesis spotlight stream."""
+        await emit({
+            "type": "synthesis_thinking",
+            "agent": "synthesis",
+            "data": {
+                "step_type": step_type,
+                "content": content,
+                "phase": str(phase),
+                "tool": tool,
+            },
+        })
+
     async for event in graph.astream(initial_state, stream_mode="updates"):
         for node_name, node_output in event.items():
             new_phase = node_output.get("current_phase", current_phase)
@@ -131,6 +144,7 @@ async def _run_langgraph_synthesis(state: PipelineState, emit: EventCallback) ->
                 # Complete previous phase
                 if current_phase > 0 and current_phase in phase_start_times:
                     duration = time.time() - phase_start_times[current_phase]
+                    await _think("phase_complete", f"Phase {current_phase} ({SYNTHESIS_PHASES.get(current_phase, {}).get('name', '')}) complete in {duration:.1f}s", current_phase)
                     await emit({
                         "type": "synthesis_phase",
                         "agent": "synthesis",
@@ -147,6 +161,7 @@ async def _run_langgraph_synthesis(state: PipelineState, emit: EventCallback) ->
                 if current_phase <= 5:
                     phase_meta = SYNTHESIS_PHASES.get(current_phase, {})
                     phase_start_times[current_phase] = time.time()
+                    await _think("phase_start", f"Phase {current_phase}/5: {phase_meta.get('name', '')} ({phase_meta.get('type', '')})", current_phase)
                     await emit({
                         "type": "synthesis_phase",
                         "agent": "synthesis",
@@ -158,11 +173,29 @@ async def _run_langgraph_synthesis(state: PipelineState, emit: EventCallback) ->
                         },
                     })
 
+            # Emit reasoning content from phase summaries
+            for summary_key in ["phase_1_summary", "phase_2_summary", "phase_3_summary"]:
+                summary = node_output.get(summary_key)
+                if summary and isinstance(summary, str):
+                    phase_num = int(summary_key.split("_")[1])
+                    await _think("reasoning", summary[:400], phase_num)
+
+            # Emit tool call log entries
+            tool_log = node_output.get("tool_call_log", [])
+            if tool_log:
+                # Only emit new entries (tool_call_log is cumulative)
+                for record in tool_log:
+                    if hasattr(record, "tool_name"):
+                        await _think("tool_call", f"{record.tool_name}({json.dumps(record.arguments)[:150] if record.arguments else ''})", current_phase, record.tool_name)
+                        if hasattr(record, "result_summary") and record.result_summary:
+                            await _think("tool_result", record.result_summary[:200], current_phase, record.tool_name)
+
             # Check for final report
             agent_report = node_output.get("phase_5_output")
             if agent_report is not None:
                 if current_phase in phase_start_times:
                     duration = time.time() - phase_start_times[current_phase]
+                    await _think("phase_complete", f"Phase 5 (Analytics Payload) complete in {duration:.1f}s", 5)
                     await emit({
                         "type": "synthesis_phase",
                         "agent": "synthesis",
@@ -642,12 +675,29 @@ async def _run_simple_synthesis(state: PipelineState, emit: EventCallback) -> Pi
     """Fallback: single LLM call synthesis, emitting new frontend schema."""
     import datetime
 
+    async def _think(step_type: str, content: str, phase: int = 1) -> None:
+        await emit({
+            "type": "synthesis_thinking",
+            "agent": "synthesis",
+            "data": {"step_type": step_type, "content": content, "phase": str(phase)},
+        })
+
+    await _think("phase_start", "Synthesis (simple mode — LangGraph unavailable)")
+    await emit({
+        "type": "synthesis_phase",
+        "agent": "synthesis",
+        "data": {"phase": 1, "status": "running", "name": "Simple Synthesis"},
+    })
+
     context = _build_synthesis_context(state)
     llm_summary = ""
     llm_findings = []
     llm_disagreements_raw = []
 
+    await _think("reasoning", f"Aggregating {len(state.sector_reports)} sector reports...")
+
     try:
+        await _think("tool_call", "llm_chat(synthesis prompt)")
         raw = await llm_chat(
             system_prompt=SYNTHESIS_SYSTEM,
             user_prompt=context,
@@ -660,7 +710,9 @@ async def _run_simple_synthesis(state: PipelineState, emit: EventCallback) -> Pi
             llm_summary = parsed.get("summary", "")
             llm_findings = parsed.get("key_findings", [])
             llm_disagreements_raw = parsed.get("disagreements", [])
-    except Exception:
+            await _think("tool_result", f"Generated summary with {len(llm_findings)} findings")
+    except Exception as e:
+        await _think("tool_result", f"LLM call failed: {str(e)[:100]}")
         pass
 
     if not llm_summary:
@@ -846,6 +898,12 @@ async def _run_simple_synthesis(state: PipelineState, emit: EventCallback) -> Pi
         },
     }
 
+    await _think("phase_complete", "Synthesis complete — report assembled")
+    await emit({
+        "type": "synthesis_phase",
+        "agent": "synthesis",
+        "data": {"phase": 1, "status": "complete", "name": "Simple Synthesis"},
+    })
     await emit({
         "type": "synthesis_complete",
         "agent": "synthesis",
