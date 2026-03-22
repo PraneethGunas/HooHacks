@@ -18,6 +18,7 @@ from backend.agents.consumer.prompts import (
     phase_5_system_prompt,
 )
 from backend.agents.consumer.schemas import (
+    CausalClaimSimple,
     ConsumerReport,
     GeoBehavioralOutput,
     PassThroughBaselineOutput,
@@ -67,7 +68,7 @@ async def consumer_phase_2_passthrough(state: dict) -> dict:
         tools=CONSUMER_PHASE_2_TOOLS,
         phase_num=2,
         state=state,
-        recursion_limit=50,
+        recursion_limit=30,
     )
 
     output = PassThroughBaselineOutput(**parsed)
@@ -104,7 +105,7 @@ async def consumer_phase_3_geo_behavioral(state: dict) -> dict:
         tools=CONSUMER_PHASE_3_TOOLS,
         phase_num=3,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     output = GeoBehavioralOutput(**parsed)
@@ -139,7 +140,7 @@ async def consumer_phase_4_purchasing_power(state: dict) -> dict:
         tools=CONSUMER_PHASE_4_TOOLS,
         phase_num=4,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     output = PurchasingPowerOutput(**parsed)
@@ -177,7 +178,7 @@ async def consumer_phase_5_scorecard(state: dict) -> dict:
         tools=CONSUMER_PHASE_5_TOOLS,
         phase_num=5,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     parsed.setdefault("sector", "consumer")
@@ -193,4 +194,45 @@ async def consumer_phase_5_scorecard(state: dict) -> dict:
         "current_phase": 5,
         "phase_5_output": report,
         "tool_call_log": state.get("tool_call_log", []) + tool_records,
+    }
+
+
+async def consumer_phase_5_minimal(state: dict) -> dict:
+    """Minimal report when Phase 1 found no relevant price shock entry points.
+
+    No data gathering, no pass-through estimation, no scorecard.
+    Saves ~200s of unnecessary work.
+    """
+    logger.info("=== CONSUMER PHASE 5 (MINIMAL): No significant price impact — skipping ===")
+
+    p1 = state.get("phase_1_output")
+    summary = p1.price_pipeline_summary if p1 else "No price shock entry points identified."
+
+    report = ConsumerReport(
+        sector="consumer",
+        direct_effects=[
+            CausalClaimSimple(
+                claim="This policy has negligible direct impact on consumer prices.",
+                cause="No significant price shock entry point identified.",
+                effect="Consumer prices, purchasing power, and household budgets remain largely unchanged.",
+                mechanism="Policy does not meaningfully affect labor costs, input costs, taxes, or "
+                         "regulatory compliance costs in consumer-facing industries.",
+                confidence="HIGH",
+                evidence=["Phase 1 analysis found no HIGH or MEDIUM relevance price shock entry points."],
+                assumptions=["Policy scope does not expand to include price-affecting provisions."],
+            )
+        ],
+        cross_sector_dependencies=[
+            "SYNTHESIS: Weight consumer/price sector as negligible in overall impact.",
+            "HOUSING: No consumer price pressure feeding into housing demand.",
+        ],
+        dissent=f"Entry point analysis: {summary}",
+        price_shock_analysis=p1,
+    )
+
+    logger.info("Consumer Phase 5 (minimal) complete: Negligible impact report")
+
+    return {
+        "current_phase": 5,
+        "phase_5_output": report,
     }

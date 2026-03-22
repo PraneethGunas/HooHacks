@@ -15,6 +15,7 @@ from backend.agents.housing.prompts import (
     phase_2_system_prompt,
 )
 from backend.agents.housing.schemas import (
+    CausalClaimSimple,
     DistributionalTemporalOutput,
     HousingBaselineOutput,
     HousingReport,
@@ -64,7 +65,7 @@ async def housing_phase_2_baseline(state: dict) -> dict:
         tools=HOUSING_PHASE_2_TOOLS,
         phase_num=2,
         state=state,
-        recursion_limit=50,
+        recursion_limit=30,
     )
 
     output = HousingBaselineOutput(**parsed)
@@ -137,7 +138,7 @@ Produce JSON matching this schema:
         tools=HOUSING_PHASE_3_TOOLS,
         phase_num=3,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     output = MagnitudeEstimationOutput(**parsed)
@@ -210,7 +211,7 @@ Produce JSON matching this schema:
         tools=HOUSING_PHASE_4_TOOLS,
         phase_num=4,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     output = DistributionalTemporalOutput(**parsed)
@@ -279,7 +280,7 @@ Produce JSON matching this schema:
         tools=HOUSING_PHASE_5_TOOLS,
         phase_num=5,
         state=state,
-        recursion_limit=30,
+        recursion_limit=20,
     )
 
     parsed.setdefault("sector", "housing")
@@ -295,4 +296,45 @@ Produce JSON matching this schema:
         "current_phase": 5,
         "phase_5_output": report,
         "tool_call_log": state.get("tool_call_log", []) + tool_records,
+    }
+
+
+async def housing_phase_5_minimal(state: dict) -> dict:
+    """Minimal report when Phase 1 found no relevant housing pathways.
+
+    No data gathering, no calculations, no scorecard. Just a brief statement
+    with the pathway analysis attached. Saves ~300s of unnecessary work.
+    """
+    logger.info("=== HOUSING PHASE 5 (MINIMAL): Negligible impact — skipping full analysis ===")
+
+    p1 = state.get("phase_1_output")
+    summary = p1.housing_relevance_summary if p1 else "No housing pathways identified."
+
+    report = HousingReport(
+        sector="housing",
+        direct_effects=[
+            CausalClaimSimple(
+                claim="This policy has negligible direct impact on housing markets.",
+                cause="No significant transmission pathway to housing costs or supply.",
+                effect="Housing prices, rents, and affordability remain largely unchanged.",
+                mechanism="Policy does not meaningfully affect construction costs, household income, "
+                         "operating costs, interest rates, migration patterns, or land use regulation.",
+                confidence="HIGH",
+                evidence=["Phase 1 pathway analysis found no HIGH or MEDIUM relevance pathways."],
+                assumptions=["Policy scope does not expand to include housing-related provisions."],
+            )
+        ],
+        cross_sector_dependencies=[
+            "CONSUMER: Housing cost line in consumer budget scorecard should be ~$0 impact.",
+            "SYNTHESIS: Weight housing sector as negligible in overall impact assessment.",
+        ],
+        dissent=f"Pathway analysis: {summary}",
+        pathway_analysis=p1,
+    )
+
+    logger.info("Housing Phase 5 (minimal) complete: Negligible impact report")
+
+    return {
+        "current_phase": 5,
+        "phase_5_output": report,
     }
