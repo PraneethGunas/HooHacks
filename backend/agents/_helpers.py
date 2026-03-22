@@ -148,40 +148,53 @@ async def _run_react_phase(
     return parsed, tool_records
 
 
-async def summarize_phase_output(phase_name: str, output_json: str) -> str:
-    """Use LLM to compress a phase output into a concise summary preserving all key data.
+def summarize_phase_output(phase_name: str, output_json: str) -> str:
+    """Programmatically compress a phase output — no LLM call needed.
 
-    This prevents context bloat when passing prior phase outputs to later phases.
+    Extracts key fields from JSON, preserving numbers and findings,
+    discarding verbose structure. ~0ms vs ~7s for LLM summarization.
     """
-    llm = get_chat_model()
+    import json as _json
 
-    response = await llm.ainvoke(
-        [
-            SystemMessage(
-                content="You are a precise summarizer. Compress the following structured data "
-                "into a concise text summary. PRESERVE all specific numbers, percentages, "
-                "dollar amounts, series IDs, geography names, and directional findings. "
-                "Remove redundant structure and verbose descriptions. "
-                "Output ONLY the summary text, no JSON, no markdown headers."
-            ),
-            HumanMessage(
-                content=f"Summarize this {phase_name} output:\n\n{output_json}"
-            ),
-        ]
-    )
+    try:
+        data = _json.loads(output_json)
+    except (ValueError, TypeError):
+        # If not valid JSON, truncate the raw text
+        return output_json[:2000]
 
-    content = response.content
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict) and "text" in part:
-                parts.append(part["text"])
-            elif isinstance(part, str):
-                parts.append(part)
-        content = "\n".join(parts)
+    lines = [f"[{phase_name}]"]
 
-    logger.info(f"Summarized {phase_name}: {len(output_json)} chars → {len(content)} chars")
-    return content
+    # Walk the dict and extract key-value pairs with numbers or short strings
+    def _extract(obj, prefix="", depth=0):
+        if depth > 3:
+            return
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, (int, float)):
+                    lines.append(f"{prefix}{k}: {v}")
+                elif isinstance(v, str) and len(v) < 200 and v:
+                    lines.append(f"{prefix}{k}: {v}")
+                elif isinstance(v, list) and len(v) <= 5 and all(isinstance(x, str) for x in v):
+                    lines.append(f"{prefix}{k}: {', '.join(v[:5])}")
+                elif isinstance(v, (dict, list)):
+                    _extract(v, prefix=f"{prefix}{k}.", depth=depth + 1)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj[:8]):
+                if isinstance(item, dict):
+                    # Extract the most identifying fields
+                    name = item.get("name") or item.get("metric_name") or item.get("region") or item.get("region_name") or item.get("pathway_id") or ""
+                    value = item.get("value") or item.get("central_estimate") or item.get("latest_value") or ""
+                    extra = item.get("trend") or item.get("confidence") or item.get("relevance") or item.get("verdict") or ""
+                    if name or value:
+                        lines.append(f"{prefix}[{i}] {name}: {value} {extra}".strip())
+                elif isinstance(item, str) and len(item) < 150:
+                    lines.append(f"{prefix}[{i}] {item}")
+
+    _extract(data)
+
+    result = "\n".join(lines[:60])  # Cap at 60 lines
+    logger.info(f"Summarized {phase_name}: {len(output_json)} chars → {len(result)} chars (programmatic)")
+    return result
 
 
 async def _run_reasoning_phase(

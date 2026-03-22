@@ -1,0 +1,24 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.5,
+      "tool_trajectory_match_type": "IN_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response contains a policy_type classification of LABOR_COST",
+        "The response contains income_effect_exists set to true",
+        "The response includes current Virginia minimum wage baseline with a FRED series ID",
+        "The response identifies at least 4 transmission channels",
+        "The response includes a sector exposure matrix",
+        "The response presents confidence levels (HIGH/MEDIUM/LOW) for each finding",
+        "The response includes downstream_directives for sector agents",
+        "The response presents ranges not point estimates for quantitative claims"
+      ]
+    },
+    "hallucinations_v1": {
+      "threshold": 0.7
+    }
+  }
+}

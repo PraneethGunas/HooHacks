@@ -37,11 +37,14 @@ NET = Inflows - Outflows → the one number that matters.
 4. NEVER double-count — if Consumer includes housing, don't add Housing separately
 5. Weight costs by ACTUAL budget shares per income tier
 6. Account for TAXES on income changes (12% at $30K, 18% at $50K, 22% at $75K, 28% at $120K)
+7. **BATCH all code_execute calculations into ONE call.** Compute all household profiles \
+in a single code block, not one per profile.
 """
 
 SYNTHESIS_IDENTITY_SHORT = """\
 You are the Synthesis Agent. Use code_execute for ALL math. \
-Assign answers to `result`. Produce JSON in ```json code fence."""
+Assign answers to `result`. BATCH all calculations into ONE code_execute call. \
+Produce JSON in ```json code fence."""
 
 
 def _summarize_housing(housing: HousingReport | None) -> str:

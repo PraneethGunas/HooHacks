@@ -1,0 +1,25 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.5,
+      "tool_trajectory_match_type": "IN_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response classifies the policy as REGULATORY_COST",
+        "The response sets income_effect_exists to false",
+        "The response includes PPI data for packaging materials with FRED or BLS series IDs",
+        "The response identifies input cost pass-through as a primary channel",
+        "The response marks wage_change as a NULL or NONE channel with explicit reason",
+        "The response marks demand_stimulus as a NULL or NONE channel",
+        "The downstream_directives tell the consumer agent to SKIP income-side calculations",
+        "The downstream_directives tell the housing agent to SKIP demand_channel_from_income_growth",
+        "The response includes analogous cases (California bag ban, EU directive, or similar)"
+      ]
+    },
+    "hallucinations_v1": {
+      "threshold": 0.7
+    }
+  }
+}

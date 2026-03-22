@@ -1,0 +1,17 @@
+{
+  "criteria": {
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.8,
+      "rubrics": [
+        "The response marks Pathway B (Household Income/Demand) as INACTIVE or LOW because income_effect_exists is false",
+        "The response marks Pathway D (Interest Rate) as INACTIVE or LOW",
+        "The response identifies housing impact as MARGINAL or NEGLIGIBLE at the national level",
+        "The response does NOT produce a full affordability scorecard for a sub-$10/month effect",
+        "The response does NOT produce a detailed 4-phase temporal sequence for a negligible effect",
+        "If regional impacts are discussed, they are limited to specific manufacturing hub areas",
+        "The response does NOT claim rent will increase by a meaningful dollar amount nationally",
+        "The response clearly states this policy is not a significant housing market driver"
+      ]
+    }
+  }
+}

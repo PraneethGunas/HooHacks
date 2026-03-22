@@ -53,7 +53,7 @@ async def synthesis_phase_1_audit(state: dict) -> dict:
         f"{len(output.inconsistencies)} inconsistencies found"
     )
 
-    phase_1_summary = await summarize_phase_output(
+    phase_1_summary = summarize_phase_output(
         "Consistency Audit (Phase 1)", output.model_dump_json(indent=2)
     )
 
@@ -87,7 +87,7 @@ async def synthesis_phase_2_impact(state: dict) -> dict:
     output = NetImpactOutput(**parsed)
     logger.info(f"Synthesis Phase 2 complete: {len(output.household_impacts)} profiles computed")
 
-    phase_2_summary = await summarize_phase_output(
+    phase_2_summary = summarize_phase_output(
         "Net Impact (Phase 2)", output.model_dump_json(indent=2)
     )
 
@@ -122,7 +122,7 @@ async def synthesis_phase_3_winners(state: dict) -> dict:
         f"{len(output.losers)} losers, {len(output.mixed)} mixed"
     )
 
-    phase_3_summary = await summarize_phase_output(
+    phase_3_summary = summarize_phase_output(
         "Winners & Losers (Phase 3)", output.model_dump_json(indent=2)
     )
 
@@ -153,7 +153,7 @@ async def synthesis_phase_4_narrative(state: dict) -> dict:
     output = NarrativeOutput(**parsed)
     logger.info(f"Synthesis Phase 4 complete: {len(output.key_findings)} key findings")
 
-    phase_4_summary = await summarize_phase_output(
+    phase_4_summary = summarize_phase_output(
         "Narrative (Phase 4)", output.model_dump_json(indent=2)
     )
 

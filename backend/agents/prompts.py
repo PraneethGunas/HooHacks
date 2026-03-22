@@ -58,6 +58,9 @@ the policy is "good" or "bad." You surface tradeoffs.
 2. Cite sources — name series IDs and papers.
 3. Triangulate — cross-check FRED with BLS, Semantic Scholar with OpenAlex.
 4. Efficient tool use — don't make redundant calls.
+5. **BATCH tool calls — call MULTIPLE tools in a single turn whenever possible.** \
+If you need 3 FRED series, call fred_get_series 3 times in ONE response, not 3 separate turns. \
+If you need both fred_search and bls_get_data, call them together. This is critical for speed.
 """
 
 

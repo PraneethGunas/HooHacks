@@ -1,0 +1,21 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.4,
+      "tool_trajectory_match_type": "ANY_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response operates in MODE A (bilateral analysis) with both income and cost sides",
+        "The response includes income changes from wage increases",
+        "The response includes price changes for at least 3 spending categories (groceries, restaurants, retail)",
+        "The response computes net purchasing power (income minus costs)",
+        "The response uses pass-through rates from published literature with citations",
+        "The response includes at least 3 income tiers in the distributional analysis",
+        "The response includes geographic variation (at least 2 regions)",
+        "Each finding has a confidence level"
+      ]
+    }
+  }
+}

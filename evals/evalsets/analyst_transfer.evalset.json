@@ -1,0 +1,26 @@
+{
+  "eval_set_id": "analyst_transfer",
+  "name": "Policy Analyst — UBI (TRANSFER)",
+  "eval_cases": [
+    {
+      "eval_id": "ubi_1000_month",
+      "conversation": [
+        {
+          "invocation_id": "full_analysis",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Implement a universal basic income of $1000 per month for all US adults" }]
+          },
+          "expected_tool_use": [
+            { "tool_name": "web_search_news", "tool_input": {} },
+            { "tool_name": "fred_search", "tool_input": {} },
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "search_openalex", "tool_input": {} },
+            { "tool_name": "search_cbo_reports", "tool_input": {} }
+          ]
+        }
+      ]
+    }
+  ]
+}

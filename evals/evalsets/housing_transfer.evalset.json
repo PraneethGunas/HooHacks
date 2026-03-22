@@ -1,0 +1,25 @@
+{
+  "eval_set_id": "housing_transfer",
+  "name": "Housing Agent — UBI (Major Housing Impact)",
+  "eval_cases": [
+    {
+      "eval_id": "housing_ubi",
+      "conversation": [
+        {
+          "invocation_id": "housing_analysis",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Analyze the housing market impact of a $1000/month universal basic income for all US adults. Policy type: TRANSFER. Income effect: TRUE. Compute all pathways." }]
+          },
+          "expected_tool_use": [
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "census_acs_query", "tool_input": {} },
+            { "tool_name": "hud_data", "tool_input": {} },
+            { "tool_name": "bls_get_data", "tool_input": {} }
+          ]
+        }
+      ]
+    }
+  ]
+}

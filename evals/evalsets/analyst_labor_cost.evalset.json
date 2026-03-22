@@ -1,0 +1,26 @@
+{
+  "eval_set_id": "analyst_labor_cost",
+  "name": "Policy Analyst — Minimum Wage (LABOR_COST)",
+  "eval_cases": [
+    {
+      "eval_id": "minwage_va_20",
+      "conversation": [
+        {
+          "invocation_id": "full_analysis",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Raise minimum wage to $20 per hour across Virginia" }]
+          },
+          "expected_tool_use": [
+            { "tool_name": "web_search_news", "tool_input": {} },
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "fred_search", "tool_input": {} },
+            { "tool_name": "fred_get_series", "tool_input": {} },
+            { "tool_name": "bls_get_data", "tool_input": {} },
+            { "tool_name": "search_openalex", "tool_input": {} }
+          ]
+        }
+      ]
+    }
+  ]
+}

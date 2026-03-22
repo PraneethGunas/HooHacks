@@ -1,0 +1,15 @@
+{
+  "criteria": {
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response operates in MODE A (bilateral analysis)",
+        "The response includes the $1000/month UBI as the income inflow",
+        "The response accounts for taxes on the UBI transfer",
+        "The response includes inflationary price pressure estimates across multiple categories",
+        "The response computes net purchasing power after accounting for price increases",
+        "The response identifies that the net gain is less than $1000 due to price effects"
+      ]
+    }
+  }
+}

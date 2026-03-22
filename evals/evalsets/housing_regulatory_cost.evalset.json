@@ -1,0 +1,21 @@
+{
+  "eval_set_id": "housing_regulatory_cost",
+  "name": "Housing Agent — Plastic Ban (Minimal Impact) — REGRESSION TEST",
+  "eval_cases": [
+    {
+      "eval_id": "housing_plastic_ban",
+      "conversation": [
+        {
+          "invocation_id": "housing_analysis",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Analyze the housing market impact of a nationwide ban on single-use plastics starting 2027. Policy type: REGULATORY_COST. Income effect: FALSE. Skip: demand_channel_from_income_growth, interest_rate_channel." }]
+          },
+          "expected_tool_use": [
+            { "tool_name": "fred_get_series", "tool_input": {} }
+          ]
+        }
+      ]
+    }
+  ]
+}
