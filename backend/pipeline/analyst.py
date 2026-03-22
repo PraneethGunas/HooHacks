@@ -275,6 +275,16 @@ async def _run_langgraph_analyst(state: PipelineState, emit: EventCallback) -> P
         },
     })
 
+    # Fire eval in background
+    try:
+        import asyncio
+        from backend.pipeline.eval_runner import evaluate_agent_output
+        asyncio.create_task(
+            evaluate_agent_output("analyst", state.briefing, emit)
+        )
+    except Exception as e:
+        logger.debug(f"Analyst eval skipped: {e}")
+
     return state
 
 

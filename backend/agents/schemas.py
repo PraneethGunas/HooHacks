@@ -45,6 +45,11 @@ class ConfidenceLevel(str, Enum):
 # ---------------------------------------------------------------------------
 
 class PolicySpec(BaseModel):
+    # Phase 0 classification (v2)
+    policy_type: str = Field(default="", description="LABOR_COST, TRANSFER, TRADE, REGULATORY_COST, TAX_FISCAL, LAND_USE, OTHER")
+    income_effect_exists: bool | None = Field(default=None, description="Does this policy create a direct household income change?")
+
+    # Phase 1 specification
     action: str = Field(description="What the policy does, e.g. 'Raise the federal minimum wage'")
     value: str = Field(description="Specific value/magnitude, e.g. '$15 per hour'")
     scope: str = Field(description="Geographic/jurisdictional scope, e.g. 'Federal, all covered employers'")
@@ -93,19 +98,22 @@ class BaselineOutput(BaseModel):
 
 class TransmissionChannel(BaseModel):
     name: str
-    mechanism: str
+    mechanism: str = ""  # Empty for NULL channels
+    status: str = ""  # "ACTIVE", "SECONDARY", "NULL" (v2)
     who_affected: list[str] = Field(default_factory=list)
     direction: str = ""
     magnitude_estimate: str = ""
     confidence: str = "THEORETICAL"
     empirically_studied: bool = False
     notes: str = ""
+    downstream_instruction: str = ""  # v2: instruction to sector agents for NULL channels
 
 
 class TransmissionMapOutput(BaseModel):
     channels: list[TransmissionChannel] = Field(default_factory=list)
     primary_channels: list[str] = Field(default_factory=list)
     cross_sector_interactions: list[str] = Field(default_factory=list)
+    downstream_directives: dict = Field(default_factory=dict)  # v2: per-agent compute/skip instructions
 
 
 # ---------------------------------------------------------------------------

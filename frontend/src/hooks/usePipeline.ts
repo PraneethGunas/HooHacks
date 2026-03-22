@@ -29,6 +29,8 @@ const initialState: PipelineState = {
   synthesisThinkingSteps: [],
   synthesis: null,
   error: null,
+  evalScores: {},
+  evalPipeline: null,
 };
 
 type PipelineAction =
@@ -145,11 +147,21 @@ function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
       return { ...state, status: "complete" };
     case "pipeline_error":
       return { ...state, status: "error", error: event.data.error || "Pipeline failed" };
+    case "eval_score": {
+      const ed = event.data as any;
+      return {
+        ...state,
+        evalScores: {
+          ...state.evalScores,
+          [ed.agent]: ed,
+        },
+      };
+    }
+    case "eval_pipeline":
+      return { ...state, evalPipeline: event.data as any };
     case "agent_start":
-      // Informational event, no state change needed
       return state;
     case "agent_result":
-      // Informational event, no state change needed
       return state;
     case "error":
       return { ...state, status: "error", error: event.data.message };
