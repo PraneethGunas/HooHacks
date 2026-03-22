@@ -305,17 +305,17 @@ function TimelineNode({
       onClick={onClick}
       className={cn(
         "group relative flex items-center gap-3 w-full text-left px-4 py-3.5 rounded-xl transition-all duration-200",
-        focused ? `${c.bg} border border-white/10` : "hover:bg-white/[0.03] border border-transparent",
+        focused ? `${c.bg} border border-white/10` : "hover:bg-white/3 border border-transparent",
       )}
     >
       {/* Timeline line */}
       {!isLast && (
-        <div className="absolute left-[27px] top-[48px] bottom-[-8px] w-px bg-white/8" />
+        <div className="absolute left-6.75 top-12 -bottom-2 w-px bg-white/8" />
       )}
 
       {/* Dot */}
       <div className={cn(
-        "relative flex-shrink-0 h-7 w-7 rounded-full grid place-items-center text-[11px] font-bold transition-all",
+        "relative shrink-0 h-7 w-7 rounded-full grid place-items-center text-[11px] font-bold transition-all",
         status === "complete" ? `${c.dot} text-black` : "",
         status === "running" ? `${c.dot} text-black animate-pulse ring-2 ${c.ring}` : "",
         status === "pending" ? "bg-white/10 text-white/30" : "",
@@ -359,10 +359,10 @@ function LightningBadge({
         "relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left",
         focused
           ? "bg-amber-500/10 border border-amber-400/20"
-          : "hover:bg-white/[0.03] border border-transparent",
+          : "hover:bg-white/3 border border-transparent",
       )}
     >
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
         <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill={paying ? "#F59E0B" : paid.length > 0 ? "#F59E0B" : "#6B7280"} />
       </svg>
       <div className="flex-1 min-w-0">
@@ -392,7 +392,7 @@ function TimelineRail({
   const elapsed = formatDuration(state.elapsedMs);
 
   return (
-    <div className="flex flex-col h-full w-[220px] flex-shrink-0 border-r border-white/8">
+    <div className="flex flex-col h-full w-55 shrink-0 border-r border-white/8">
       {/* Header — minimal */}
       <div className="px-4 py-4 border-b border-white/8 flex items-center justify-between">
         <span className="text-[13px] font-semibold text-white/50">Agents</span>
@@ -477,7 +477,7 @@ const SOURCE_COLORS: Record<string, { badge: string; border: string; bg: string 
   emerald: { badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30", border: "border-emerald-500/25", bg: "bg-emerald-500/[0.05]" },
   orange:  { badge: "bg-orange-500/20 text-orange-300 border-orange-500/30", border: "border-orange-500/25", bg: "bg-orange-500/[0.05]" },
   amber:   { badge: "bg-amber-500/20 text-amber-300 border-amber-500/30",   border: "border-amber-500/25",  bg: "bg-amber-500/[0.05]" },
-  white:   { badge: "bg-white/10 text-white/60 border-white/20",            border: "border-white/10",      bg: "bg-white/[0.02]" },
+  white:   { badge: "bg-white/10 text-white/60 border-white/20",            border: "border-white/10",      bg: "bg-white/2" },
 };
 
 /** Parse tool args from content string */
@@ -533,7 +533,7 @@ function ToolCallCard({ entry, isLatest }: { entry: StreamEntry; isLatest: boole
   return (
     <div className={cn(
       "mx-6 my-2 rounded-xl border transition-all duration-300 spotlight-entry overflow-hidden",
-      isLatest ? `${sc.border} ${sc.bg} shadow-sm` : "border-white/[0.06] bg-white/[0.02]",
+      isLatest ? `${sc.border} ${sc.bg} shadow-sm` : "border-white/6 bg-white/2",
     )}>
       {/* Header row: source badge + tool name + pulse */}
       <div className="flex items-center gap-3 px-4 py-3">
@@ -589,7 +589,7 @@ function ToolResultCard({ entry }: { entry: StreamEntry }) {
   const sc = SOURCE_COLORS[info?.color ?? "white"] ?? SOURCE_COLORS.white;
 
   return (
-    <div className={cn("mx-6 -mt-0.5 mb-2 rounded-b-xl border border-t-0 spotlight-entry", "border-white/[0.06] bg-white/[0.015]")}>
+    <div className={cn("mx-6 -mt-0.5 mb-2 rounded-b-xl border border-t-0 spotlight-entry", "border-white/6 bg-white/1.5")}>
       <div className="flex items-start gap-3 px-4 py-2.5">
         <span className="text-green-400/60 text-sm mt-0.5">✓</span>
         <div className="flex-1 min-w-0">
@@ -615,13 +615,13 @@ function PaymentCard({ entry, isLatest }: { entry: StreamEntry; isLatest: boolea
     <div className={cn(
       "mx-6 my-2 rounded-xl border transition-all duration-300 spotlight-entry overflow-hidden",
       isPaying
-        ? "border-amber-500/30 bg-amber-500/[0.06]"
+        ? "border-amber-500/30 bg-amber-500/6"
         : isPaid
-          ? "border-green-500/20 bg-green-500/[0.04]"
-          : "border-red-500/20 bg-red-500/[0.04]",
+          ? "border-green-500/20 bg-green-500/4"
+          : "border-red-500/20 bg-red-500/4",
     )}>
       <div className="flex items-center gap-3 px-4 py-3">
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
           <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill={isPaying ? "#F59E0B" : isPaid ? "#4ADE80" : "#F87171"} />
         </svg>
         <span className={cn(
@@ -664,10 +664,10 @@ function SpotlightEntry({ entry, isLatest }: { entry: StreamEntry; isLatest: boo
   return (
     <div className={cn(
       "flex gap-4 py-3 px-6 transition-colors duration-500 spotlight-entry",
-      isLatest && "bg-white/[0.03]",
+      isLatest && "bg-white/3",
       entry.type === "phase" && "mt-4 first:mt-0",
     )}>
-      <span className="flex-shrink-0 mt-1.5 w-5 text-center">
+      <span className="shrink-0 mt-1.5 w-5 text-center">
         <StreamIcon type={entry.type} />
       </span>
       <div className="flex-1 min-w-0">
@@ -752,14 +752,14 @@ function SpotlightPanel({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Spotlight header */}
-      <div className={cn("flex-shrink-0 border-b px-6 py-5", borderColor)}>
+      <div className={cn("shrink-0 border-b px-6 py-5", borderColor)}>
         <div className="flex items-center gap-4">
           <div className={cn("text-2xl font-semibold", textColor)}>{meta.label}</div>
           <span className={cn(
             "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[12px] font-medium border",
             status === "complete" ? "border-green-500/30 text-green-400 bg-green-500/10" :
-            status === "running" ? `${borderColor} ${textColor} bg-white/[0.03]` :
-            "border-white/10 text-white/30 bg-white/[0.02]",
+            status === "running" ? `${borderColor} ${textColor} bg-white/3` :
+            "border-white/10 text-white/30 bg-white/2",
           )}>
             {status === "running" && <span className="h-2 w-2 rounded-full bg-current animate-pulse" />}
             {status}
@@ -836,7 +836,7 @@ function SpotlightPanel({
           {/* Cursor when agent is running */}
           {status === "running" && (
             <div className="flex gap-4 py-3 px-6">
-              <span className="flex-shrink-0 mt-1.5 w-5 text-center">
+              <span className="shrink-0 mt-1.5 w-5 text-center">
                 <span className={cn("inline-block h-2.5 w-2.5 rounded-full animate-pulse", `bg-${meta.color}-400`)} />
               </span>
               <span className="text-[15px] text-white/25 italic">thinking...</span>
@@ -847,9 +847,9 @@ function SpotlightPanel({
 
       {/* Lightning payment summary bar */}
       {agentId === "lightning" && state.lightningPayments.length > 0 && (
-        <div className="flex-shrink-0 border-t border-amber-500/20 bg-amber-950/10 px-6 py-3">
+        <div className="shrink-0 border-t border-amber-500/20 bg-amber-950/10 px-6 py-3">
           <div className="flex items-center gap-4 text-[13px]">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
               <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill="#F59E0B" />
             </svg>
             <span className="text-amber-200/80 font-medium">
@@ -870,7 +870,7 @@ function SpotlightPanel({
 
       {/* View report CTA */}
       {state.synthesis && (
-        <div className="flex-shrink-0 border-t border-white/8 px-6 py-4">
+        <div className="shrink-0 border-t border-white/8 px-6 py-4">
           <button
             onClick={onViewReport}
             className="w-full rounded-xl border border-amber-400/30 bg-amber-500/90 px-4 py-3 text-base font-medium text-black transition hover:brightness-95"

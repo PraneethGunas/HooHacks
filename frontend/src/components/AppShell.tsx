@@ -32,7 +32,7 @@ export default function AppShell() {
   };
 
   return (
-    <main className="min-h-screen text-[var(--text-primary)]">
+    <main className="min-h-screen text-foreground">
       {screen !== "query" && (
         <nav className="sticky top-0 z-30 border-b border-white/10 bg-[#0a0c0f]/95 backdrop-blur px-4 sm:px-6 py-3 flex items-center gap-3">
           <BoltIcon />
@@ -40,7 +40,7 @@ export default function AppShell() {
             Policy<span className="logo-pulse-word">Pulse</span>
           </span>
 
-          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] p-1 text-xs">
+          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-white/3 p-1 text-xs">
             <button
               onClick={() => setScreen("query")}
               className={cn(

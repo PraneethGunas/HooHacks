@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { SynthesisReport } from "@/types/pipeline";
+import SankeyDiagram from "@/components/SankeyDiagram";
 
 // ─── Types (permissive — API sends inconsistent casing) ───────────────────────
 
@@ -249,23 +249,9 @@ function buildFallbackSankey(categories: CategoryItem[] | null | undefined): San
 function ConfBadge({ c }: { c: unknown }) {
   const s = getConfStyle(c);
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border font-medium relative cursor-help",
-        large ? "px-3.5 py-1 text-sm gap-2" : "px-2.5 py-0.5 text-xs",
-        s.pill,
-      )}
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
-      <span className={cn(large ? "h-2 w-2" : "h-1.5 w-1.5", "rounded-full", s.dot)} />
-      {large ? null : <span className="ml-1.5" />}
+    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", s.pill)}>
+      <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", s.dot)} />
       {s.label}
-      {showTooltip && (
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-black/95 border border-white/10 px-3 py-2 text-[11px] text-white/70 leading-relaxed z-50 pointer-events-none shadow-lg">
-          {tooltipText[s.label] ?? "Confidence assessment from multi-agent analysis"}
-        </span>
-      )}
     </span>
   );
 }
@@ -281,7 +267,7 @@ function Chevron({ open }: { open: boolean }) {
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("rounded-2xl border border-white/10 bg-[var(--bg-surface)] p-5", className)}>
+    <div className={cn("rounded-2xl border border-white/10 bg-(--bg-surface) p-5", className)}>
       {children}
     </div>
   );
@@ -292,7 +278,6 @@ function SectionHeading({ label, sub }: { label: string; sub?: string }) {
   return (
     <div className="mb-5">
       <h3 className="text-base font-semibold text-white/85">{label}</h3>
-      {sub && <p className="mt-0.5 text-sm text-white/45">{sub}</p>}
       {sub && <p className="mt-0.5 text-sm text-white/45">{sub}</p>}
     </div>
   );
@@ -380,18 +365,6 @@ function PolicyHeader({ report }: { report: FullReport }) {
         <div className="flex h-3 overflow-hidden rounded-full bg-white/8">
           <div className="bg-emerald-500/65 transition-all duration-700" style={{ width: `${posW}%` }} />
           <div className="flex-1 bg-red-500/45" />
-        <div className="flex h-3 overflow-hidden rounded-full bg-white/8">
-          <div className="bg-emerald-500/65 transition-all duration-700" style={{ width: `${posW}%` }} />
-          <div className="flex-1 bg-red-500/45" />
-        </div>
-        <div className="flex justify-between text-xs text-white/35">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500/65" />Gains
-          </span>
-          <span className="flex items-center gap-1.5">
-            Costs &amp; risks
-            <span className="h-2 w-2 rounded-full bg-red-500/45" />
-          </span>
         </div>
         <div className="flex justify-between text-xs text-white/35">
           <span className="flex items-center gap-1.5">
@@ -449,7 +422,7 @@ function KpiStrip({ metrics }: { metrics: HeadlineMetric[] | null | undefined })
 
 // ─── 3: Waterfall chart ───────────────────────────────────────────────────────
 
-function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
+function WaterfallChart({ data }: { data: WaterfallData }) {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
 
   const steps = safeArr(data?.steps).filter((s) => {
@@ -483,7 +456,7 @@ function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
         </span>
       </div>
 
-      <div className="w-full overflow-hidden rounded-lg border border-white/8 bg-white/[0.02] p-2">
+      <div className="w-full overflow-hidden rounded-lg border border-white/8 bg-white/2 p-2">
         <svg
           className="block w-full"
           height={svgH}
@@ -634,14 +607,14 @@ function CategoryChart({ categories }: { categories: CategoryItem[] | null | und
         const cat = sorted.find((c) => c.name === expanded);
         if (!cat) return null;
         return (
-          <div className="mt-3 overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/10 bg-white/3 p-4">
             <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-              <span className="min-w-0 break-words text-sm font-semibold leading-snug text-white/85">{cleanName(safeStr(cat.name))}</span>
+              <span className="min-w-0 wrap-break-word text-sm font-semibold leading-snug text-white/85">{cleanName(safeStr(cat.name))}</span>
               <ConfBadge c={cat.confidence} />
             </div>
-            <p className="mb-2 break-words text-sm leading-relaxed text-white/55">{safeStr(cat.explanation)}</p>
-            {cat.note && <p className="mb-2 break-words text-xs leading-relaxed text-amber-300/70">{cat.note}</p>}
-            <div className="break-words text-xs tabular-nums text-white/30">
+            <p className="mb-2 wrap-break-word text-sm leading-relaxed text-white/55">{safeStr(cat.explanation)}</p>
+            {cat.note && <p className="mb-2 wrap-break-word text-xs leading-relaxed text-amber-300/70">{cat.note}</p>}
+            <div className="wrap-break-word text-xs tabular-nums text-white/30">
               Range: {fmtDollar(safeNum(cat.dollar_impact_monthly?.low))} to {fmtDollar(safeNum(cat.dollar_impact_monthly?.high))}/mo
             </div>
           </div>
@@ -801,10 +774,6 @@ function TimelineChart({
           );
         })}
       </div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -890,7 +859,7 @@ function WinnersLosers({ data }: { data: NonNullable<FullReport["winners_losers"
   return (
     <div className="space-y-4">
       {verdictText && (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4">
+        <div className="rounded-xl border border-white/10 bg-white/3 px-5 py-4">
           <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-white/40">
             Distributional verdict
           </div>
@@ -937,7 +906,7 @@ function GeographicImpact({ regions }: { regions: GeographicRegion[] | null | un
         const rentSv  = getSeverityStyle(r.rent_impact_severity);
         const priceSv = getSeverityStyle(r.price_impact_severity);
         return (
-          <div key={r.id ?? i} className="rounded-xl border border-white/10 bg-[var(--bg-surface)] p-5">
+          <div key={r.id ?? i} className="rounded-xl border border-white/10 bg-(--bg-surface) p-5">
             <div className="mb-1 text-base font-semibold text-white/88">{safeStr(r.name)}</div>
             {r.examples && <div className="mb-3 text-xs text-white/35">{r.examples}</div>}
             {r.net_monthly_range_median_hh && (
@@ -1062,7 +1031,7 @@ function ConfidenceRadar({ data }: { data: NonNullable<FullReport["confidence_as
               <Chevron open={expandedScenario} />
             </button>
             {expandedScenario && (
-              <div className="space-y-2 rounded-xl border border-white/8 bg-white/[0.02] p-3">
+              <div className="space-y-2 rounded-xl border border-white/8 bg-white/2 p-3">
                 {scenarios.map((item, i) => (
                   <div key={i} className="flex gap-2.5 text-sm text-white/50">
                     <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/50" />
@@ -1138,7 +1107,7 @@ function NarrativePanel({
         ))}
       </div>
 
-      <div className="mb-5 rounded-lg border border-white/8 bg-white/[0.02] p-3">
+      <div className="mb-5 rounded-lg border border-white/8 bg-white/2 p-3">
         <p className="text-sm leading-7 text-white/65">{buildSummary(activeCell)}</p>
         {activeCell && (
           <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-white/40 sm:grid-cols-2">
@@ -1254,8 +1223,6 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
             />
             <WinnersLosers data={report.winners_losers!} />
           </Card>
-        </>
-      )}
         </>
       )}
 

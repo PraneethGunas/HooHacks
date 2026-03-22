@@ -31,7 +31,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${playfairDisplay.variable} ${dmMono.variable} h-full antialiased`}>
-      <body className="min-h-full bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans">{children}</body>
+      <body className="min-h-full bg-background text-foreground font-sans">{children}</body>
     </html>
   );
 }
