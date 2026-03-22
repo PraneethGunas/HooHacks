@@ -352,11 +352,36 @@ Produce 2-4 direct, 1-3 second-order, 1-2 feedback loops.""",
 
 
 # ---------------------------------------------------------------------------
-# Fallback demo responses (when no LLM key is available)
+# Error report (when LLM fails in production — no mock data)
+# ---------------------------------------------------------------------------
+
+def _error_report(sector: str, error_msg: str) -> SectorReport:
+    """Create a SectorReport that clearly signals an LLM failure.
+
+    Unlike _fallback_report(), this does NOT inject fake claims.
+    The synthesis agent will see empty effects and the error in dissent,
+    allowing it to handle the gap transparently.
+    """
+    return SectorReport(
+        sector=sector,
+        direct_effects=[],
+        second_order_effects=[],
+        feedback_loops=[],
+        cross_sector_dependencies=[s for s in SECTORS if s != sector],
+        dissent=f"⚠️ LLM ERROR — {sector} analysis unavailable: {error_msg}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fallback demo responses (ONLY for frontend Demo/mock flow)
 # ---------------------------------------------------------------------------
 
 def _fallback_report(sector: str, state: PipelineState) -> SectorReport:
-    """Generate a minimal demo SectorReport without LLM."""
+    """Generate a minimal demo SectorReport without LLM.
+
+    ⚠️  This should ONLY be called from the frontend mock/demo pipeline.
+    It must NEVER be used as an automatic fallback in the production pipeline.
+    """
     return SectorReport(
         sector=sector,
         direct_effects=[
@@ -556,10 +581,10 @@ async def _run_one_sector_single_shot(
                 logger.warning(f"Sector {sector}: parsed report has 0 direct_effects, raw[:500]={raw[:500]}")
         else:
             logger.warning(f"Sector {sector}: LLM returned None (no API key configured?)")
-            report = _fallback_report(sector, state)
+            report = _error_report(sector, "LLM returned no response — check API key configuration")
     except Exception:
         logger.error(f"Sector {sector} LLM failed: {traceback.format_exc()}")
-        report = _fallback_report(sector, state)
+        report = _error_report(sector, f"LLM call failed: {traceback.format_exc()[:300]}")
 
     report.agent_mode = "single_shot"
     return report
@@ -879,9 +904,9 @@ async def run_sector_agents(state: PipelineState, emit: EventCallback) -> Pipeli
     for sector, result in zip(SECTORS, reports):
         if isinstance(result, Exception):
             logger.error(f"Sector {sector} failed: {result}")
-            fallback = _fallback_report(sector, state)
-            fallback.agent_mode = "single_shot"
-            state.sector_reports.append(fallback)
+            error = _error_report(sector, f"Agent crashed: {str(result)[:300]}")
+            error.agent_mode = "single_shot"
+            state.sector_reports.append(error)
         else:
             state.sector_reports.append(result)
 

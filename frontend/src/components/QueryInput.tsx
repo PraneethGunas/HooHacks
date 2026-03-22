@@ -96,7 +96,7 @@ export default function QueryInput({ onSubmit, onMockSubmit }: QueryInputProps) 
               )}
               <button
                 onClick={submit}
-                disabled={!canRun}
+                disabled={canRun ? undefined : true}
                 className={cn(
                   "flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#ffe4a6] via-[#ffd06e] to-[#ffb870] px-5 py-2.5 text-[15px] font-semibold text-[#101319] transition",
                   canRun

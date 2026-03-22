@@ -717,67 +717,18 @@ function SpotlightPanel({
   onViewReport: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const entryRefs = useRef<(HTMLDivElement | null)[]>([]);
   const prevLengthRef = useRef(0);
-  const rafRef = useRef<number>(0);
   const meta = AGENT_META[agentId];
   const status = getAgentStatus(agentId, state);
   const stream = useMemo(() => buildStream(agentId, state), [agentId, state]);
 
-  // Fisheye effect: scale + fade entries based on distance from viewport center
-  const applyFisheye = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const centerY = containerRect.top + containerRect.height / 2;
-
-    for (const el of entryRefs.current) {
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      const elCenterY = rect.top + rect.height / 2;
-      // Normalized distance: 0 = dead center, 1 = one viewport half away
-      const dist = Math.abs(elCenterY - centerY) / (containerRect.height / 2);
-      // Scale: center = 1.06, edges = 0.55, hard falloff
-      const scale = Math.max(0.55, 1.06 - dist * 0.55);
-      // Opacity: center = 1.0, edges fade hard to near-zero
-      const opacity = Math.max(0.04, 1 - Math.pow(dist, 1.4) * 1.1);
-      el.style.transform = `scale(${scale})`;
-      el.style.opacity = `${opacity}`;
-    }
-  }, []);
-
-  // Run fisheye on scroll
-  const handleScroll = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(applyFisheye);
-  }, [applyFisheye]);
-
-  // Run fisheye whenever stream changes + auto-scroll latest to center
+  // Auto-scroll on new entries
   useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    // Auto-scroll new entries to center
-    if (stream.length > prevLengthRef.current) {
-      const latestEl = entryRefs.current[stream.length - 1];
-      if (latestEl) {
-        const elTop = latestEl.offsetTop;
-        const elHeight = latestEl.offsetHeight;
-        const containerHeight = container.clientHeight;
-        const scrollTarget = elTop - containerHeight / 2 + elHeight / 2;
-        container.scrollTo({ top: Math.max(0, scrollTarget), behavior: "smooth" });
-      }
+    if (stream.length > prevLengthRef.current && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }
     prevLengthRef.current = stream.length;
-
-    // Apply fisheye after layout
-    requestAnimationFrame(applyFisheye);
-  }, [stream.length, applyFisheye]);
-
-  // Also reapply on agent switch
-  useEffect(() => {
-    requestAnimationFrame(applyFisheye);
-  }, [agentId, applyFisheye]);
+  }, [stream.length]);
 
   const colorMap: Record<string, string> = {
     sky: "border-sky-500/30", blue: "border-blue-500/30", amber: "border-amber-500/30",
@@ -873,33 +824,24 @@ function SpotlightPanel({
         )}
       </div>
 
-      {/* Stream area — scroll-driven fisheye: center item magnifies, both directions fade */}
+      {/* Stream area */}
       {stream.length === 0 ? (
         <EmptySpotlight agentId={agentId} status={status} />
       ) : (
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto no-scrollbar"
-        >
-          {/* Top spacer — lets first entries reach the center */}
-          <div className="h-[45vh]" />
-
+        <div ref={scrollRef} className="flex-1 overflow-y-auto py-4 no-scrollbar">
           {stream.map((entry, i) => (
-            <div
-              key={entry.id}
-              ref={el => { entryRefs.current[i] = el; }}
-              style={{
-                transformOrigin: "left center",
-                willChange: "transform, opacity",
-              }}
-            >
-              <SpotlightEntry entry={entry} isLatest={i === stream.length - 1 && status === "running"} />
-            </div>
+            <SpotlightEntry key={entry.id} entry={entry} isLatest={i === stream.length - 1 && status === "running"} />
           ))}
 
-          {/* Bottom spacer — lets last entries reach the center */}
-          <div className="h-[45vh]" />
+          {/* Cursor when agent is running */}
+          {status === "running" && (
+            <div className="flex gap-4 py-3 px-6">
+              <span className="flex-shrink-0 mt-1.5 w-5 text-center">
+                <span className={cn("inline-block h-2.5 w-2.5 rounded-full animate-pulse", `bg-${meta.color}-400`)} />
+              </span>
+              <span className="text-[15px] text-white/25 italic">thinking...</span>
+            </div>
+          )}
         </div>
       )}
 
