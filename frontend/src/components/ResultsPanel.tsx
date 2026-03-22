@@ -10,7 +10,7 @@ import type { SynthesisReport } from "@/types/pipeline";
 // never crashes on partial / malformed LLM output.
 // ───────────────────────────────────────────────────────────────────────────────
 
-type Confidence = "HIGH" | "MEDIUM" | "LOW";
+type Confidence = "HIGH" | "MEDIUM" | "LOW" | "EMPIRICAL" | "THEORETICAL" | "SPECULATIVE";
 
 interface ResultsPanelProps {
   report: SynthesisReport;
@@ -22,16 +22,20 @@ interface ResultsPanelProps {
 // Slate/blue = neutral info, low confidence (not alarming)
 // Emerald = gains, positive outcomes, high confidence
 
-const CONF_STYLES: Record<Confidence, { pill: string; dot: string; label: string }> = {
-  HIGH:   { pill: "border-emerald-500/30 bg-emerald-950/40 text-emerald-400", dot: "bg-emerald-400", label: "High confidence" },
-  MEDIUM: { pill: "border-amber-500/25 bg-amber-950/30 text-amber-400",      dot: "bg-amber-400",   label: "Medium confidence" },
-  LOW:    { pill: "border-slate-500/30 bg-slate-800/40 text-slate-400",       dot: "bg-slate-400",   label: "Low confidence" },
+const CONF_STYLES: Record<string, { pill: string; dot: string; label: string }> = {
+  HIGH:        { pill: "border-emerald-500/30 bg-emerald-950/40 text-emerald-400", dot: "bg-emerald-400", label: "High confidence" },
+  MEDIUM:      { pill: "border-amber-500/25 bg-amber-950/30 text-amber-400",      dot: "bg-amber-400",   label: "Medium confidence" },
+  LOW:         { pill: "border-slate-500/30 bg-slate-800/40 text-slate-400",       dot: "bg-slate-400",   label: "Low confidence" },
+  // Map backend epistemic levels → visual confidence
+  EMPIRICAL:   { pill: "border-emerald-500/30 bg-emerald-950/40 text-emerald-400", dot: "bg-emerald-400", label: "Data-backed" },
+  THEORETICAL: { pill: "border-amber-500/25 bg-amber-950/30 text-amber-400",      dot: "bg-amber-400",   label: "Model-based" },
+  SPECULATIVE: { pill: "border-slate-500/30 bg-slate-800/40 text-slate-400",       dot: "bg-slate-400",   label: "Uncertain" },
 };
 
-// Safe lookup — normalises any casing from the API, falls back to MEDIUM
+// Safe lookup — normalises any casing from the API, maps epistemic levels
 function confStyle(raw: string | undefined | null) {
   if (!raw) return CONF_STYLES.MEDIUM;
-  const key = raw.toUpperCase() as Confidence;
+  const key = raw.toUpperCase();
   return CONF_STYLES[key] ?? CONF_STYLES.MEDIUM;
 }
 
@@ -338,21 +342,32 @@ function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
       </div>
 
       {/* Net summary */}
-      <div className="mt-5 grid grid-cols-3 gap-3">
-        {[
-          { label: "Net monthly gain", value: `+$${data.net_monthly ?? 0}`, big: true },
-          { label: "Over a year", value: `+$${(data.net_annual ?? 0).toLocaleString()}` },
-          { label: "% of income", value: `+${data.pct_of_income ?? 0}%` },
-        ].map((s) => (
-          <div key={s.label}
-            className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 text-center">
-            <div className="text-xs text-white/40">{s.label}</div>
-            <div className={cn("mt-1 font-semibold text-emerald-300", s.big ? "text-2xl" : "text-lg")}>
-              {s.value}
-            </div>
+      {(() => {
+        const netM = data.net_monthly ?? 0;
+        const netA = data.net_annual ?? 0;
+        const pctI = data.pct_of_income ?? 0;
+        const isNeg = netM < 0;
+        const sign = isNeg ? "–" : "+";
+        const borderColor = isNeg ? "border-red-500/20 bg-red-950/15" : "border-emerald-500/20 bg-emerald-950/15";
+        const textColor = isNeg ? "text-red-300" : "text-emerald-300";
+        return (
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            {[
+              { label: isNeg ? "Net monthly cost" : "Net monthly gain", value: `${sign}$${Math.abs(netM)}`, big: true },
+              { label: "Over a year", value: `${sign}$${Math.abs(netA).toLocaleString()}` },
+              { label: "% of income", value: `${sign}${Math.abs(pctI)}%` },
+            ].map((s) => (
+              <div key={s.label}
+                className={cn("rounded-xl border p-3 text-center", borderColor)}>
+                <div className="text-xs text-white/40">{s.label}</div>
+                <div className={cn("mt-1 font-semibold", textColor, s.big ? "text-2xl" : "text-lg")}>
+                  {s.value}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
     </div>
   );
 }
@@ -749,7 +764,10 @@ function ConfidenceRadar({ data }: { data: SynthesisReport["confidence_assessmen
   const [expandedScenario, setExpandedScenario] = useState(false);
   const components = (data?.by_component ?? []).slice(0, 5);
   if (components.length === 0) return <div className="text-sm text-white/30">No confidence data available</div>;
-  const scores: Record<Confidence, number> = { HIGH: 1, MEDIUM: 0.55, LOW: 0.2 };
+  const scores: Record<string, number> = {
+    HIGH: 1, MEDIUM: 0.55, LOW: 0.2,
+    EMPIRICAL: 1, THEORETICAL: 0.55, SPECULATIVE: 0.2,
+  };
 
   const SIZE = 180;
   const cx = SIZE / 2; const cy = SIZE / 2;
@@ -881,7 +899,7 @@ function NarrativePanel({ narrative }: { narrative: SynthesisReport["narrative"]
 
       {/* Content — always rendered fresh from getContent() */}
       <p className="mb-5 text-sm leading-7 text-white/65">
-        {getContent(activeTab)}
+        {getContent(activeTab) || <span className="italic text-white/30">No specific analysis available for this demographic yet.</span>}
       </p>
 
       <div className="rounded-xl border border-amber-500/18 bg-amber-950/12 px-4 py-3">
@@ -890,6 +908,46 @@ function NarrativePanel({ narrative }: { narrative: SynthesisReport["narrative"]
         </div>
         <p className="text-sm text-white/55">{narrative?.biggest_uncertainty ?? ""}</p>
       </div>
+    </div>
+  );
+}
+
+// ─── Evidence Summary ────────────────────────────────────────────────────────
+
+function EvidenceSummary({ data }: { data: SynthesisReport["evidence_summary"] }) {
+  const [showAll, setShowAll] = useState(false);
+  if (!data?.key_studies?.length) return null;
+  const studies = showAll ? data.key_studies : data.key_studies.slice(0, 5);
+
+  return (
+    <div className="space-y-3">
+      {data.consensus && (
+        <p className="text-sm leading-6 text-white/55">{data.consensus}</p>
+      )}
+      <div className="space-y-2">
+        {studies.map((s, i) => (
+          <div key={i} className="flex items-start gap-2.5 rounded-lg border border-white/7 px-3 py-2.5">
+            <ConfBadge c={s.applicability?.includes("empirical") ? "EMPIRICAL" : s.applicability?.includes("theoretical") ? "THEORETICAL" : "SPECULATIVE"} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white/70 truncate">{s.name}</p>
+              <p className="text-xs text-white/35 mt-0.5">{s.source_agent} — {s.finding?.slice(0, 80)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {data.key_studies.length > 5 && (
+        <button
+          onClick={() => setShowAll(!showAll)}
+          className="text-xs text-white/40 hover:text-white/60 transition-colors"
+        >
+          {showAll ? "Show fewer" : `Show all ${data.key_studies.length} citations`}
+        </button>
+      )}
+      {data.major_gap && (
+        <div className="rounded-lg border border-amber-500/15 bg-amber-950/10 px-3 py-2 text-xs text-amber-300/70">
+          Gap in evidence: {data.major_gap}
+        </div>
+      )}
     </div>
   );
 }
@@ -1087,6 +1145,32 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       {/* Data sources summary banner */}
       <DataSourcesSummary report={report} />
 
+      {/* Agent errors / missing agents banner */}
+      {(report.meta?.agents_missing?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-red-500/25 bg-red-950/15 px-5 py-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-red-400/80">
+            Agent errors detected
+          </div>
+          <p className="text-sm text-white/60">
+            {report.meta.agents_missing.length} agent(s) failed to produce analysis:{" "}
+            <span className="font-medium text-red-300/80">{report.meta.agents_missing.join(", ")}</span>.
+            Results below may be incomplete.
+          </p>
+        </div>
+      )}
+
+      {/* Consistency issues banner */}
+      {(report.consistency_report?.unresolved_gaps?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-950/12 px-5 py-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-amber-400/70">
+            Unresolved gaps
+          </div>
+          {report.consistency_report.unresolved_gaps.map((gap, i) => (
+            <p key={i} className="text-sm text-white/55">{gap}</p>
+          ))}
+        </div>
+      )}
+
       {/* ── Step 1: What is this policy? ── */}
       <div id="section-overview">
         <StepBadge n={1} label="Policy overview" />
@@ -1152,18 +1236,20 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       </Card>
 
       {/* ── Step 5: Does location matter? ── */}
-      <div id="section-geography">
-        <StepBadge n={5} label="Does location matter?" />
-      </div>
-      <Card>
-        <SectionHeading
-          label="Impact by region"
-          sub="High-cost cities absorb more of the UBI through rent. Low-cost areas keep more."
-        />
-        {report.geographic_impact?.regions && (
-          <GeographicImpact regions={report.geographic_impact.regions} />
-        )}
-      </Card>
+      {(report.geographic_impact?.regions?.length ?? 0) > 0 && (
+        <>
+          <div id="section-geography">
+            <StepBadge n={5} label="Does location matter?" />
+          </div>
+          <Card>
+            <SectionHeading
+              label="Impact by region"
+              sub="Geographic variation in how this policy affects households"
+            />
+            <GeographicImpact regions={report.geographic_impact.regions} />
+          </Card>
+        </>
+      )}
 
       {/* ── Step 6: How certain is this? ── */}
       <div id="section-confidence">
@@ -1188,6 +1274,35 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
           {report.narrative && <NarrativePanel narrative={report.narrative} />}
         </Card>
       </div>
+
+      {/* Evidence summary — only if we have citations */}
+      {(report.evidence_summary?.key_studies?.length ?? 0) > 0 && (
+        <Card>
+          <SectionHeading
+            label={report.evidence_summary?.title ?? "What the Research Says"}
+            sub="Citations aggregated from sector agent analyses"
+          />
+          <EvidenceSummary data={report.evidence_summary} />
+        </Card>
+      )}
+
+      {/* Methodology notes */}
+      {(report.data_sources?.methodology_notes?.length ?? 0) > 0 && (
+        <Card className="border-white/8 bg-white/[0.02]">
+          <SectionHeading
+            label="Methodology"
+            sub="How this analysis was produced"
+          />
+          <div className="space-y-1.5">
+            {report.data_sources.methodology_notes.map((note, i) => (
+              <div key={i} className="flex items-start gap-2.5 text-sm text-white/50">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400/40" />
+                {note}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* ── Step 7: What you can do ── */}
       <div id="section-actions">
