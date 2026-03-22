@@ -247,3 +247,19 @@ html::before {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Spotlight stream entry — animation plays once via React key stability */
+.spotlight-entry {
+  animation: spotlightIn 300ms ease-out both;
+}
+
+@keyframes spotlightIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
