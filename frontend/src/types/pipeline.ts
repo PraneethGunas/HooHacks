@@ -9,7 +9,6 @@ export interface CausalClaim {
   evidence: string[];
   assumptions: string[];
   sensitivity: string | null;
-  survived_debate?: boolean;
 }
 
 export interface ToolCallRecord {
@@ -32,29 +31,6 @@ export interface SectorReport {
   agent_mode: AgentMode;
 }
 
-export type ChallengeType =
-  | "assumption_conflict"
-  | "confidence_inflation"
-  | "missing_mechanism"
-  | "blind_spot";
-
-export interface AgentChallenge {
-  target_agent: string;
-  target_claim: CausalClaim;
-  challenge_type: ChallengeType;
-  counter_evidence: string[];
-  proposed_revision: string | null;
-}
-
-export type RebuttalResponse = "concede" | "defend" | "revise";
-
-export interface AgentRebuttal {
-  original_claim: CausalClaim;
-  challenge: AgentChallenge;
-  response: RebuttalResponse;
-  revised_claim: CausalClaim | null;
-  new_evidence: string[];
-}
 
 export interface SankeyNode {
   id: string;
@@ -74,45 +50,233 @@ export interface SankeyData {
   links: SankeyLink[];
 }
 
+export interface Range {
+  low: string;
+  central: string;
+  high: string;
+}
+
+export interface NumRange {
+  low: number;
+  central: number;
+  high: number;
+}
+
+export interface HeadlineMetric {
+  id: string;
+  label: string;
+  value: string;
+  range: Range | null;
+  unit: string;
+  direction: "positive" | "negative" | "neutral";
+  confidence: Confidence;
+  icon: string;
+  context: string;
+}
+
+export interface WaterfallStep {
+  label: string;
+  value: number;
+  cumulative: number;
+  type: "inflow" | "outflow" | "neutral" | "net";
+  source_agent: string;
+  note: string | null;
+}
+
+export interface ImpactMatrixCell {
+  income: string;
+  type: string;
+  geography: string;
+  net_monthly: NumRange;
+  net_annual: NumRange;
+  pct_of_income: NumRange;
+  confidence: Confidence;
+  verdict: string;
+  dominant_inflow: string;
+  dominant_outflow: string;
+  note: string;
+}
+
+export interface CategoryBreakdown {
+  name: string;
+  icon: string;
+  pct_change: NumRange;
+  dollar_impact_monthly: NumRange;
+  budget_share_low_income: number;
+  budget_share_middle_income: number;
+  budget_share_high_income: number;
+  pass_through_rate: string;
+  time_to_full_effect: string;
+  source_agent: string;
+  confidence: Confidence;
+  explanation: string;
+  note?: string;
+}
+
+export interface TimelinePhase {
+  label: string;
+  period_start: number;
+  period_end: number;
+  cumulative_net_monthly: NumRange;
+  what_happens: string[];
+  mood: string;
+  dominant_driver: string;
+}
+
+export interface WinnerLoserProfile {
+  profile: string;
+  icon: string;
+  net_monthly_range: string;
+  pct_of_income_range: string;
+  why: string;
+  confidence: Confidence;
+  impact_quality?: string;
+  caveat?: string;
+  depends_on?: string;
+}
+
+export interface GeographicRegion {
+  id: string;
+  name: string;
+  examples: string;
+  net_direction: string;
+  color: string;
+  rent_impact_severity: string;
+  price_impact_severity: string;
+  net_monthly_range_median_hh: string;
+  explanation: string;
+  key_factor: string;
+}
+
 export interface SynthesisReport {
-  policy_summary: {
-    title: string;
-    scope: string;
-    affected_sectors: string[];
-  };
-  agreed_findings: Array<{
-    claim: CausalClaim;
-    agreeing_agents: string[];
-  }>;
-  disagreements: Array<{
-    topic: string;
-    positions: Record<string, string>;
-  }>;
-  challenge_survival: Array<{
-    challenge: AgentChallenge;
-    outcome: RebuttalResponse;
-    final_claim: CausalClaim;
-  }>;
-  unified_impact: {
-    summary: string;
-    headline_stats: Array<{ label: string; value: string; sub?: string }>;
-    key_claims: CausalClaim[];
-  };
-  impact_dashboard: Array<{
-    category: string;
-    direction: "increase" | "decline" | "mixed" | "distortionary";
-    magnitude: string;
-    confidence: Confidence;
-    survived_challenge: "yes" | "no" | "partial";
-    status: "works" | "doesnt_work" | "tradeoff";
-    sectors: Array<"labor" | "housing" | "consumer" | "business" | "fiscal" | "cross-sector">;
-  }>;
-  sankey_data: SankeyData;
-  metadata: {
+  meta: {
+    version: string;
+    generated_at: string;
+    pipeline_duration_seconds: number;
     total_tool_calls: number;
-    total_llm_calls: number;
-    duration_ms: number;
-    lightning_payments: LightningPaymentEvent["data"][];
+    agents_completed: string[];
+    agents_missing: string[];
+    model_used: string;
+    query: string;
+  };
+  policy: {
+    title: string;
+    one_liner: string;
+    type: string;
+    geography: string;
+    effective_date: string | null;
+    current_baseline: string;
+    proposed_change: string;
+    estimated_annual_cost: string;
+    key_ambiguities: string[];
+    working_assumptions: string[];
+  };
+  headline: {
+    verdict: string;
+    bottom_line: string;
+    confidence: Confidence | string;
+    confidence_explanation: string;
+  };
+  headline_metrics: HeadlineMetric[];
+  waterfall: {
+    title: string;
+    subtitle: string;
+    household_profile: string;
+    steps: WaterfallStep[];
+    net_monthly: number;
+    net_annual: number;
+    pct_of_income: number;
+  };
+  impact_matrix: {
+    title: string;
+    subtitle: string;
+    income_tiers: Array<{ id: string; label: string; monthly: number }>;
+    geographies: Array<{ id: string; label: string; example: string }>;
+    household_types: Array<{ id: string; label: string }>;
+    cells: ImpactMatrixCell[];
+  };
+  category_breakdown: {
+    title: string;
+    subtitle: string;
+    categories: CategoryBreakdown[];
+  };
+  timeline: {
+    title: string;
+    subtitle: string;
+    household_profile: string;
+    phases: TimelinePhase[];
+  };
+  winners_losers: {
+    title: string;
+    winners: WinnerLoserProfile[];
+    losers: WinnerLoserProfile[];
+    mixed: WinnerLoserProfile[];
+    distributional_verdict: {
+      progressive_or_regressive: string;
+      explanation: string;
+      geographic_equity: string;
+      generational_equity: string;
+    };
+  };
+  geographic_impact: {
+    title: string;
+    regions: GeographicRegion[];
+  };
+  consistency_report: {
+    title: string;
+    inconsistencies_found: number;
+    adjustments: Array<{
+      variable: string;
+      original_source: string;
+      original_value: string;
+      issue: string;
+      resolved_source: string;
+      resolved_value: string;
+      impact_on_output: string;
+      severity: string;
+    }>;
+    unresolved_gaps: string[];
+  };
+  confidence_assessment: {
+    overall: Confidence | string;
+    by_component: Array<{
+      component: string;
+      confidence: Confidence | string;
+      reasoning: string;
+    }>;
+    weakest_link: string;
+    what_would_change_conclusion: string[];
+  };
+  evidence_summary: {
+    title: string;
+    key_studies: Array<{
+      name: string;
+      finding: string;
+      applicability: string;
+      source_agent: string;
+    }>;
+    consensus: string;
+    major_gap: string;
+  };
+  data_sources: {
+    title: string;
+    agents_and_calls: Array<{
+      agent: string;
+      tool_calls: number;
+      key_data: string[];
+      phases_completed: number;
+    }>;
+    total_tool_calls: number;
+    total_unique_data_series: number;
+    methodology_notes: string[];
+  };
+  narrative: {
+    executive_summary: string;
+    for_low_income: string;
+    for_middle_income: string;
+    for_upper_income: string;
+    for_small_business: string;
+    biggest_uncertainty: string;
   };
 }
 
@@ -197,15 +361,9 @@ export interface SectorAgentThinkingEvent {
   timestamp: string;
 }
 
-export interface DebateChallengeEvent {
-  type: "debate_challenge";
-  data: { challenge: AgentChallenge };
-  timestamp: string;
-}
-
-export interface RevisionCompleteEvent {
-  type: "revision_complete";
-  data: { rebuttal: AgentRebuttal };
+export interface SynthesisPhaseEvent {
+  type: "synthesis_phase";
+  data: { phase: number; name: string; status: "running" | "complete" };
   timestamp: string;
 }
 
@@ -254,8 +412,7 @@ export type PipelineEvent =
   | SectorAgentToolCallEvent
   | SectorAgentCompleteEvent
   | SectorAgentThinkingEvent
-  | DebateChallengeEvent
-  | RevisionCompleteEvent
+  | SynthesisPhaseEvent
   | SynthesisCompleteEvent
   | ErrorEvent
   | PipelineCompleteEvent
@@ -286,6 +443,7 @@ export interface PipelineState {
       thinkingSteps: ThinkingStep[];
     }
   >;
+  synthesisPhase: { phase: number; name: string; status: "running" | "complete" } | null;
   synthesis: SynthesisReport | null;
   error: string | null;
 }

@@ -47,14 +47,14 @@ export default function QueryInput({ onSubmit }: QueryInputProps) {
         </div>
 
         <p className="text-base leading-7 font-medium text-white/80">
-          PolicyPulse is running a full workflow simulation from classifier to analyst, through parallel sector agents, then debate,
-          revisions, and synthesis. Run the scenario and watch the agents negotiate assumptions in real time.
+          PolicyPulse runs a multi-agent economic simulation: classifier, analyst, parallel sector agents,
+          and a 5-phase synthesis engine. Watch the agents reason through impacts in real time.
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-2 text-[11px]">
           <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">Stage 0: Classifier</span>
           <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sky-300">Stage 1-2: Parallel Agent Analysis</span>
-          <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-rose-300">Stage 3-4: Debate + Report</span>
+          <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-rose-300">Stage 3: Synthesis</span>
         </div>
 
         <div className="mt-5 rounded-2xl border border-white/15 glass-card p-3 text-left shadow-[0_8px_30px_rgba(0,0,0,0.28)]">

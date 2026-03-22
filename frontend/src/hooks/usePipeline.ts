@@ -23,6 +23,7 @@ const initialState: PipelineState = {
   analystComplete: null,
   lightningPayments: [],
   sectorAgents: buildInitialSectorAgents(),
+  synthesisPhase: null,
   synthesis: null,
   error: null,
 };
@@ -97,10 +98,8 @@ function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
         currentPhase: td.phase ?? prev.currentPhase,
       }));
     }
-    case "debate_challenge":
-    case "revision_complete":
-      // Debate removed — ignore legacy events gracefully
-      return state;
+    case "synthesis_phase":
+      return { ...state, synthesisPhase: event.data };
     case "synthesis_complete":
       return { ...state, status: "complete", synthesis: event.data.report };
     case "pipeline_complete":
