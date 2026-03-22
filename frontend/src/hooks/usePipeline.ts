@@ -18,12 +18,15 @@ const initialState: PipelineState = {
   status: "idle",
   query: "",
   elapsedMs: 0,
+  classifierThinkingSteps: [],
   classifier: null,
   analystToolCalls: [],
   analystComplete: null,
+  analystThinkingSteps: [],
   lightningPayments: [],
   sectorAgents: buildInitialSectorAgents(),
   synthesisPhase: null,
+  synthesisThinkingSteps: [],
   synthesis: null,
   error: null,
 };
@@ -51,12 +54,36 @@ function setAgentStatus(
 
 function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
   switch (event.type) {
+    case "classifier_thinking": {
+      const cd = event.data as any;
+      const step: ThinkingStep = {
+        id: ++_thinkingIdCounter,
+        stepType: cd.step_type ?? "reasoning",
+        content: cd.content ?? "",
+        phase: cd.phase ?? "0",
+        tool: cd.tool,
+        timestamp: Date.now(),
+      };
+      return { ...state, classifierThinkingSteps: [...state.classifierThinkingSteps, step] };
+    }
     case "classifier_complete":
       return { ...state, classifier: event.data };
     case "analyst_tool_call":
       return { ...state, analystToolCalls: [...state.analystToolCalls, event.data] };
     case "analyst_complete":
       return { ...state, analystComplete: event.data };
+    case "analyst_thinking": {
+      const ad = event.data as any;
+      const step: ThinkingStep = {
+        id: ++_thinkingIdCounter,
+        stepType: ad.step_type ?? "reasoning",
+        content: ad.content ?? "",
+        phase: ad.phase ?? "0",
+        tool: ad.tool,
+        timestamp: Date.now(),
+      };
+      return { ...state, analystThinkingSteps: [...state.analystThinkingSteps, step] };
+    }
     case "lightning_payment":
       return { ...state, lightningPayments: [...state.lightningPayments, event.data] };
     case "sector_agent_started":
@@ -97,6 +124,18 @@ function applyEvent(state: PipelineState, event: PipelineEvent): PipelineState {
         thinkingSteps: [...prev.thinkingSteps, step],
         currentPhase: td.phase ?? prev.currentPhase,
       }));
+    }
+    case "synthesis_thinking": {
+      const sd = event.data as any;
+      const synthStep: ThinkingStep = {
+        id: ++_thinkingIdCounter,
+        stepType: sd.step_type ?? "reasoning",
+        content: sd.content ?? "",
+        phase: sd.phase ?? "0",
+        tool: sd.tool,
+        timestamp: Date.now(),
+      };
+      return { ...state, synthesisThinkingSteps: [...state.synthesisThinkingSteps, synthStep] };
     }
     case "synthesis_phase":
       return { ...state, synthesisPhase: event.data };

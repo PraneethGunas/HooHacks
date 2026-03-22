@@ -361,6 +361,39 @@ export interface SectorAgentThinkingEvent {
   timestamp: string;
 }
 
+export interface ClassifierThinkingEvent {
+  type: "classifier_thinking";
+  data: {
+    step_type: ThinkingStepType;
+    content: string;
+    phase?: string;
+    tool?: string;
+  };
+  timestamp: string;
+}
+
+export interface AnalystThinkingEvent {
+  type: "analyst_thinking";
+  data: {
+    step_type: ThinkingStepType;
+    content: string;
+    phase?: string;
+    tool?: string;
+  };
+  timestamp: string;
+}
+
+export interface SynthesisThinkingEvent {
+  type: "synthesis_thinking";
+  data: {
+    step_type: ThinkingStepType;
+    content: string;
+    phase?: string;
+    tool?: string;
+  };
+  timestamp: string;
+}
+
 export interface SynthesisPhaseEvent {
   type: "synthesis_phase";
   data: { phase: number; name: string; status: "running" | "complete" };
@@ -404,15 +437,18 @@ export interface AgentResultEvent {
 }
 
 export type PipelineEvent =
+  | ClassifierThinkingEvent
   | ClassifierCompleteEvent
   | AnalystToolCallEvent
   | AnalystCompleteEvent
+  | AnalystThinkingEvent
   | LightningPaymentEvent
   | SectorAgentStartedEvent
   | SectorAgentToolCallEvent
   | SectorAgentCompleteEvent
   | SectorAgentThinkingEvent
   | SynthesisPhaseEvent
+  | SynthesisThinkingEvent
   | SynthesisCompleteEvent
   | ErrorEvent
   | PipelineCompleteEvent
@@ -424,6 +460,7 @@ export interface PipelineState {
   status: "idle" | "running" | "complete" | "error";
   query: string;
   elapsedMs: number;
+  classifierThinkingSteps: ThinkingStep[];
   classifier: ClassifierCompleteEvent["data"] | null;
   analystToolCalls: AnalystToolCallEvent["data"][];
   analystComplete: AnalystCompleteEvent["data"] | null;
@@ -443,7 +480,9 @@ export interface PipelineState {
       thinkingSteps: ThinkingStep[];
     }
   >;
+  analystThinkingSteps: ThinkingStep[];
   synthesisPhase: { phase: number; name: string; status: "running" | "complete" } | null;
+  synthesisThinkingSteps: ThinkingStep[];
   synthesis: SynthesisReport | null;
   error: string | null;
 }
