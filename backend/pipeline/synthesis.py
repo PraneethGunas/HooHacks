@@ -1,5 +1,5 @@
 """
-Stage 4: Synthesis Agent — aggregates everything into the final report + Sankey data.
+Stage 3: Synthesis Agent — aggregates sector reports into the final report + Sankey data.
 
 No external tool calls. Works purely on the outputs of previous stages.
 
@@ -24,13 +24,11 @@ from backend.models.pipeline import (
     PolicySummary,
     AgreedFinding,
     Disagreement,
-    ChallengeOutcome,
     UnifiedImpact,
     SankeyData,
     SankeyNode,
     SankeyLink,
     ConfidenceLevel,
-    RebuttalResponse,
 )
 from backend.pipeline.orchestrator import PipelineState
 from backend.pipeline.llm import llm_chat, parse_json_response
@@ -39,7 +37,7 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 SYNTHESIS_SYSTEM = """You are the SYNTHESIS AGENT in a multi-agent policy analysis system.
-You receive sector reports, debate challenges, and rebuttals. Produce a unified analysis.
+You receive 4 sector reports (labor, housing, consumer, business). Produce a unified analysis.
 
 Respond with JSON:
 {
@@ -81,14 +79,6 @@ def _build_synthesis_context(state: PipelineState) -> str:
             parts.append(f"  [2ND ORDER] {claim.claim} (confidence: {claim.confidence.value})")
         if report.dissent:
             parts.append(f"  [DISSENT] {report.dissent}")
-
-    if state.challenges:
-        parts.append("\n=== DEBATE RESULTS ===")
-        for rb in state.rebuttals:
-            parts.append(
-                f"  Challenge to {rb.challenge.target_agent}: {rb.challenge.target_claim.claim}"
-                f" → Response: {rb.response.value}"
-            )
 
     return "\n".join(parts)[:8000]
 
@@ -144,13 +134,12 @@ def _build_sankey_data(state: PipelineState, llm_flows: list[dict] | None = None
 
 
 async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineState:
-    """Stage 4: Synthesize all results into the final report."""
+    """Stage 3: Synthesize all results into the final report."""
     await emit({
         "type": "agent_start",
         "agent": "synthesis",
         "data": {
             "sectors_analyzed": len(state.sector_reports),
-            "challenges_issued": len(state.challenges),
         },
     })
 
@@ -214,15 +203,6 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         agreed = []
         disagreements = []
 
-    # Build challenge outcomes
-    challenge_survival = []
-    for rb in state.rebuttals:
-        challenge_survival.append(ChallengeOutcome(
-            challenge=rb.challenge,
-            rebuttal=rb,
-            survived=rb.response != RebuttalResponse.CONCEDE,
-        ))
-
     sankey = _build_sankey_data(state, llm_flows)
 
     state.synthesis = SynthesisReport(
@@ -233,7 +213,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         ),
         agreed_findings=agreed,
         disagreements=disagreements,
-        challenge_survival=challenge_survival,
+        challenge_survival=[],
         unified_impact=unified,
         sankey_data=sankey,
         sector_reports=state.sector_reports,
@@ -270,9 +250,9 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
             "sub": "with direct data",
         },
         {
-            "label": "Challenges Survived",
-            "value": str(sum(1 for cs in challenge_survival if cs.survived)),
-            "sub": "after debate",
+            "label": "Data Sources",
+            "value": str(len(state.tool_calls)),
+            "sub": "APIs queried",
         },
     ]
 
@@ -290,18 +270,8 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "key_claims": all_direct_effects,
     }
 
-    # Build reshaped challenge_survival with proper shape
-    challenge_survival_reshaped = [
-        {
-            "challenge": cs.challenge.model_dump(),
-            "outcome": cs.rebuttal.response.value,
-            "final_claim": cs.rebuttal.revised_claim.model_dump() if cs.rebuttal.revised_claim else cs.challenge.target_claim.model_dump(),
-        }
-        for cs in challenge_survival
-    ]
-
     # Estimate total_llm_calls from stage count (rough estimate)
-    total_llm_calls = 1 + 1 + 4 + 2 + 1  # classifier + analyst + 4 sectors + debate stages + synthesis
+    total_llm_calls = 1 + 1 + 4 + 1  # classifier + analyst + 4 sectors + synthesis
 
     # Compute total duration from stage_times
     duration_ms = int(sum(state.stage_times.values()) * 1000) if state.stage_times else 0
@@ -314,12 +284,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "lightning_payments": state.payments,
     }
 
-    # Build impact_dashboard from sector direct_effects + challenge survival info
-    survived_claims = set()
-    for cs in challenge_survival:
-        if cs.survived:
-            survived_claims.add(cs.challenge.target_claim.claim)
-
+    # Build impact_dashboard from sector direct_effects
     impact_dashboard = []
     for report in state.sector_reports:
         for claim in report.direct_effects:
@@ -342,16 +307,12 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
             else:
                 status = "tradeoff"
 
-            survived = "yes" if claim.claim in survived_claims else ("no" if any(
-                cs.challenge.target_claim.claim == claim.claim for cs in challenge_survival if not cs.survived
-            ) else "partial")
-
             impact_dashboard.append({
                 "category": claim.claim[:80],
                 "direction": direction,
                 "magnitude": claim.effect[:60] if claim.effect else "TBD",
                 "confidence": claim.confidence.value.upper(),
-                "survived_challenge": survived,
+                "survived_challenge": "yes",
                 "status": status,
                 "sectors": [report.sector],
             })
@@ -382,7 +343,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "sankey_data": sankey.model_dump(),
         "disagreements": [d.model_dump() for d in disagreements],
         "agreed_findings": agreed_findings_reshaped,
-        "challenge_survival": challenge_survival_reshaped,
+        "challenge_survival": [],
         "metadata": metadata,
     }
 

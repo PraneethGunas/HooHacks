@@ -70,11 +70,6 @@ async def pipeline_health() -> dict:
     except Exception as e:
         checks["sector"] = str(e)
     try:
-        from backend.pipeline.debate import run_debate
-        checks["debate"] = "ok"
-    except Exception as e:
-        checks["debate"] = str(e)
-    try:
         from backend.pipeline.synthesis import run_synthesis
         checks["synthesis"] = "ok"
     except Exception as e:

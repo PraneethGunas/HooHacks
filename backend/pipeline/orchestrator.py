@@ -1,5 +1,5 @@
 """
-Pipeline orchestrator — runs all 5 stages and streams SSE events.
+Pipeline orchestrator — runs all stages and streams SSE events.
 
 ===========================================================================
 INTEGRATION GUIDE
@@ -10,8 +10,7 @@ This orchestrator runs each pipeline stage sequentially:
   Stage 1: Analyst       — gather baseline data from public APIs
   Stage 1.5: Premium     — L402 Lightning payments for gated data (🟢 REAL)
   Stage 2: Sector Agents — 4 parallel LLM analyses (labor, housing, consumer, business)
-  Stage 3: Debate        — adversarial challenge of weakest claims
-  Stage 4: Synthesis     — aggregate into final report + Sankey data
+  Stage 3: Synthesis     — aggregate into final report + Sankey data
 
 CURRENT STATUS:
   - Stages use LLM (Google Gemini / OpenAI / Anthropic) when API keys are set
@@ -37,8 +36,6 @@ from typing import Any, Callable, Awaitable
 from backend.models.pipeline import (
     SectorReport,
     SynthesisReport,
-    AgentChallenge,
-    AgentRebuttal,
 )
 
 
@@ -69,10 +66,6 @@ class PipelineState:
     sector_reports: list[SectorReport] = field(default_factory=list)
 
     # Stage 3 output
-    challenges: list[AgentChallenge] = field(default_factory=list)
-    rebuttals: list[AgentRebuttal] = field(default_factory=list)
-
-    # Stage 4 output
     synthesis: SynthesisReport | None = None
 
     # Timing
@@ -111,7 +104,6 @@ async def run_pipeline(
     from backend.pipeline.classifier import run_classifier
     from backend.pipeline.analyst import run_analyst
     from backend.pipeline.sector import run_sector_agents
-    from backend.pipeline.debate import run_debate
     from backend.pipeline.synthesis import run_synthesis
 
     try:
@@ -135,15 +127,10 @@ async def run_pipeline(
         state = await run_sector_agents(state, _emit)
         state.stage_times["sector"] = time.time() - t2
 
-        # Stage 3: Debate
+        # Stage 3: Synthesis
         t3 = time.time()
-        state = await run_debate(state, _emit)
-        state.stage_times["debate"] = time.time() - t3
-
-        # Stage 4: Synthesis
-        t4 = time.time()
         state = await run_synthesis(state, _emit)
-        state.stage_times["synthesis"] = time.time() - t4
+        state.stage_times["synthesis"] = time.time() - t3
 
         total = time.time() - state.start_time
         state.stage_times["total"] = total
@@ -194,8 +181,6 @@ def _current_stage(state: PipelineState) -> str:
     """Determine which stage we're in based on what's populated."""
     if state.synthesis:
         return "synthesis"
-    if state.challenges:
-        return "debate"
     if state.sector_reports:
         return "sector"
     if state.briefing:
