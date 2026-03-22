@@ -7,6 +7,30 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
+# Stage 0: Classifier Output (powered by Google ADK)
+# ---------------------------------------------------------------------------
+
+class PolicyTaskType(str, Enum):
+    MINIMUM_WAGE       = "minimum_wage"
+    TRADE_TARIFF       = "trade_tariff"
+    IMMIGRATION        = "immigration"
+    TAX_POLICY         = "tax_policy"
+    HOUSING_REGULATION = "housing_regulation"
+    HEALTHCARE         = "healthcare"
+    EDUCATION          = "education"
+    ENVIRONMENTAL      = "environmental"
+    OTHER              = "other"
+
+
+class ClassifierOutput(BaseModel):
+    task_type:     PolicyTaskType       = Field(description="Detected policy category")
+    policy_params: dict[str, str]       = Field(default_factory=dict, description="Key policy parameters extracted from the query (action, value, scope, timeline, …)")
+    confidence:    str                  = Field(description="Classification confidence: high | medium | low")
+    cleaned_query: str                  = Field(description="Normalised, unambiguous version of the user's input")
+    reasoning:     str                  = Field(default="", description="One-sentence explanation of the classification")
+
+
+# ---------------------------------------------------------------------------
 # Confidence levels (shared across all phases)
 # ---------------------------------------------------------------------------
 

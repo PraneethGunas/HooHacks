@@ -6,7 +6,7 @@ uvicorn[standard]>=0.29.0
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
 
-# HTTP client (tools, LLM calls, premium agent)
+# HTTP client (used by premium_agent for non-L402 requests)
 httpx>=0.27.0
 
 # HTML/PDF parsing (fetch_document_text tool)
@@ -25,12 +25,23 @@ pytest-asyncio>=0.23,<1.0
 
 # NOTE: L402 payments use lnget (Go binary from lightning-agent-tools).
 # No Python Lightning dependencies needed.
+# Install: go install github.com/lightninglabs/lnget/cmd/lnget@latest
 
-# LLM SDKs — not needed, we use raw httpx calls to provider APIs.
-# Uncomment if switching to LangChain/LangGraph:
+# Data APIs (for Rudra's agent tools)
+# requests>=2.31.0
+# beautifulsoup4>=4.12.0
+
+# LLM SDKs (uncomment as needed)
 # openai>=1.14.0
 # google-generativeai>=0.4.0
 # anthropic>=0.21.0
 # langgraph>=0.4.0
 # langchain-core>=0.3.0
 # langchain-google-genai>=2.0
+
+# Stage 0 Classifier — Google ADK (SZNS Solutions sponsor track)
+google-adk>=0.3.0
+
+# LangGraph (Rudra's agent orchestration)
+# langgraph>=0.0.30
+# langchain-core>=0.1.30

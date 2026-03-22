@@ -32,7 +32,7 @@ _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = {"env_file": str(_ENV_PATH), "env_file_encoding": "utf-8"}
+    model_config = {"env_file": str(_ENV_PATH), "env_file_encoding": "utf-8", "extra": "ignore"}
 
     # --- LLM ---
     # 🔴 REQUIRED: At least one LLM key needed for agent pipeline.
@@ -61,9 +61,15 @@ class Settings(BaseSettings):
     debug: bool = True
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # LLM routing
+    # LLM settings
+    gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key")
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
+    anthropic_api_key: Optional[str] = Field(None, description="Anthropic API key")
     llm_provider: str = Field("gemini", description="LLM provider: gemini, openai, or anthropic")
     llm_model_name: str = Field("gemini-2.5-flash", description="LLM model name")
+    # Stage 0 classifier uses a cheap/fast model — separate from the main pipeline model.
+    # Google ADK defaults to Gemini, so this only applies when llm_provider == "gemini".
+    classifier_model_name: str = Field("gemini-2.5-flash", description="Fast model for Stage 0 ADK Classifier")
 
 
 settings = Settings()
