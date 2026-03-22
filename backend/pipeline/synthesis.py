@@ -910,6 +910,25 @@ async def _run_simple_synthesis(state: PipelineState, emit: EventCallback) -> Pi
         "data": {"report": report_data},
     })
 
+    # Fire eval in background + aggregate pipeline eval
+    try:
+        import asyncio
+        from backend.pipeline.eval_runner import evaluate_agent_output, evaluate_pipeline_health
+        synthesis_eval = asyncio.create_task(
+            evaluate_agent_output("synthesis", report_data, emit)
+        )
+
+        # Collect all agent eval results for pipeline-level eval
+        async def _run_pipeline_eval():
+            syn_result = await synthesis_eval
+            agent_results = [r for r in [syn_result] if r is not None]
+            # The sector evals already fired — pipeline eval is a summary
+            await evaluate_pipeline_health(agent_results, emit)
+
+        asyncio.create_task(_run_pipeline_eval())
+    except Exception as e:
+        logger.debug(f"Synthesis eval skipped: {e}")
+
     return state
 
 

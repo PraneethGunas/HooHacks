@@ -833,8 +833,11 @@ async def _run_langgraph_sector(
 LANGGRAPH_SECTORS = {"housing", "consumer"}
 
 
-async def _emit_sector_complete(sector: str, report: SectorReport, emit: EventCallback) -> None:
-    """Emit the sector_agent_complete SSE event with properly formatted report data."""
+async def _emit_sector_complete(sector: str, report: SectorReport, emit: EventCallback, state: PipelineState | None = None) -> None:
+    """Emit the sector_agent_complete SSE event with properly formatted report data.
+
+    Also fires background eval on the agent's output.
+    """
     report_dict = report.model_dump()
     for claim_list_key in ("direct_effects", "second_order_effects", "feedback_loops"):
         for claim_dict in report_dict.get(claim_list_key, []):
@@ -857,6 +860,20 @@ async def _emit_sector_complete(sector: str, report: SectorReport, emit: EventCa
         },
     })
 
+    # Fire eval in background (non-blocking)
+    try:
+        from backend.pipeline.eval_runner import evaluate_agent_output
+        policy_type = ""
+        income_effect = None
+        if state and state.briefing:
+            policy_type = state.briefing.get("policy_type", "") if isinstance(state.briefing, dict) else ""
+            income_effect = state.briefing.get("income_effect_exists") if isinstance(state.briefing, dict) else None
+        asyncio.create_task(
+            evaluate_agent_output(sector, report, emit, policy_type=policy_type, income_effect=income_effect)
+        )
+    except Exception as e:
+        logger.debug(f"Eval for {sector} skipped: {e}")
+
 
 async def run_sector_agents(state: PipelineState, emit: EventCallback) -> PipelineState:
     """Stage 2: Run all 4 sector agents in parallel.
@@ -869,7 +886,7 @@ async def run_sector_agents(state: PipelineState, emit: EventCallback) -> Pipeli
             report = await _run_langgraph_sector(sector, state, emit)
         else:
             report = await _run_one_sector_single_shot(sector, state, emit)
-        await _emit_sector_complete(sector, report, emit)
+        await _emit_sector_complete(sector, report, emit, state=state)
         return report
 
     tasks = [_run_sector(sector) for sector in SECTORS]
