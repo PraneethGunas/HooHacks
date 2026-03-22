@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="PolicyPulse icon logo">
+  <defs>
+    <linearGradient id="boltGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffe4a6"/>
+      <stop offset="55%" stop-color="#ffd06e"/>
+      <stop offset="100%" stop-color="#ffb870"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#0a0c0f" rx="220"/>
+
+  <g transform="translate(264 176)">
+    <path d="M296 24L40 344h212L168 648 424 328H212L296 24z" fill="url(#boltGradient)"/>
+    <path d="M296 24L40 344h212L168 648 424 328H212L296 24z" fill="none" stroke="#ffffff22" stroke-width="10"/>
+  </g>
+</svg>

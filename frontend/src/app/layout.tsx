@@ -17,6 +17,11 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: "PolicyPulse",
   description: "Multi-agent policy simulation frontend",
+  icons: {
+    icon: "/bolt-favicon.svg",
+    shortcut: "/bolt-favicon.svg",
+    apple: "/bolt-favicon.svg",
+  },
 };
 
 export default function RootLayout({
