@@ -145,3 +145,53 @@ class FetchDocumentOutput(BaseModel):
     content_type: str
     truncated: bool
     char_count: int
+
+
+# ---------------------------------------------------------------------------
+# Census ACS Query
+# ---------------------------------------------------------------------------
+
+class CensusACSOutput(BaseModel):
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    geography: str = ""
+    year: int = 0
+    variables_requested: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# BEA Regional Data
+# ---------------------------------------------------------------------------
+
+class BEADataPoint(BaseModel):
+    year: str = ""
+    value: str = ""
+    geo_name: str = ""
+    unit: str = ""
+
+
+class BEARegionalOutput(BaseModel):
+    table_name: str = ""
+    geo_fips: str = ""
+    data: list[BEADataPoint] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# HUD Data
+# ---------------------------------------------------------------------------
+
+class HUDDataOutput(BaseModel):
+    dataset: str = ""
+    entity_id: str = ""
+    data: dict | list = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Code Execute
+# ---------------------------------------------------------------------------
+
+class CodeExecuteOutput(BaseModel):
+    stdout: str = ""
+    result: str | None = None
+    error: str | None = None
+    execution_time_ms: float = 0

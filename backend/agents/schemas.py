@@ -116,7 +116,7 @@ class EvidenceItem(BaseModel):
     channel_name: str
     source_type: str = ""
     title: str = ""
-    authors: str = ""
+    authors: str | None = ""
     year: int | None = None
     key_finding: str = ""
     effect_size: str = ""

@@ -1,0 +1,448 @@
+# Housing & Cost of Living Agent — Tool Inventory
+
+## Input (Not a Tool — Provided by Orchestrator)
+
+The agent receives the **Policy Analyst's Briefing** as structured
+context before any tool calls. This provides:
+- Policy specification (exact parameters, scope, phase-in)
+- Baseline economic data (income levels, employment, CPI)
+- Transmission channel map (which channels affect housing)
+- Sector exposure matrix (housing row gives starting direction)
+
+The agent uses this as its STARTING POINT, not as sufficient input.
+All tools below are for the agent's OWN deep research.
+
+---
+
+## Tool 1: fred_search
+
+**Purpose in Housing Context:** Discover housing-related FRED series
+the agent doesn't know the ID for. Housing data in FRED is extensive
+but series IDs are not intuitive.
+
+**Typical Housing Queries:**
+- "housing starts" → HOUST
+- "building permits" → PERMIT
+- "30 year mortgage rate" → MORTGAGE30US
+- "median home price" → MSPUS
+- "Case Shiller home price index" → CSUSHPINSA
+- "rental vacancy rate" → RRVRUSQ156N
+- "homeownership rate" → RHORUSQ156N
+- "house price index virginia" → state-level HPI
+- "real residential investment" → PRRESCONS
+- "construction spending residential" → TLRESCONS
+
+**API:** FRED — `https://api.stlouisfed.org/fred/series/search`
+**Auth:** FRED API key (free)
+**Cost:** Free
+
+---
+
+## Tool 2: fred_get_series
+
+**Purpose in Housing Context:** Pull actual time series data for
+housing market indicators. This is the primary source for national
+and state-level housing market conditions.
+
+**Critical Housing Series:**
+
+| Series ID | What It Measures | Use For |
+|-----------|-----------------|---------|
+| MORTGAGE30US | 30-year fixed mortgage rate | Mortgage affordability |
+| MORTGAGE15US | 15-year fixed mortgage rate | Mortgage affordability |
+| HOUST | Housing starts (national) | Supply pipeline |
+| PERMIT | Building permits (national) | Supply pipeline leading indicator |
+| MSPUS | Median sales price of houses sold | Home price baseline |
+| CSUSHPINSA | Case-Shiller Home Price Index (national) | Home price trend |
+| RRVRUSQ156N | Rental vacancy rate | Market tightness |
+| RHORUSQ156N | Homeownership rate | Tenure composition |
+| TLRESCONS | Total residential construction spending | Construction activity |
+| CUSR0000SEHA | CPI - Rent of primary residence | Rent inflation |
+| CUSR0000SEHC | CPI - Owners' equivalent rent | Imputed owner cost |
+| TTLHHM[ST]A156N | Total households by state | Household formation |
+| [STATE]HPINDEX | State-level house price index | Regional price trends |
+| FIXHAI | Housing Affordability Index | Composite affordability |
+
+**State-specific patterns:**
+- `[STATE]POP` — State population
+- `[STATE]HPINDEX` or `ATNHPIUS[FIPS]A` — State/metro HPI
+- FRED has limited state-level rent data; use Census ACS for this
+
+**API:** FRED — `https://api.stlouisfed.org/fred/series` + `/observations`
+**Auth:** FRED API key (free)
+**Cost:** Free
+
+---
+
+## Tool 3: bls_get_data
+
+**Purpose in Housing Context:** Granular price data (CPI shelter
+components, construction material prices) and construction employment
+data that FRED doesn't carry at the needed granularity.
+
+**Critical BLS Series for Housing:**
+
+*CPI Shelter Components:*
+| Series ID | What It Measures |
+|-----------|-----------------|
+| CUSR0000SAH1 | CPI - Shelter (overall) |
+| CUSR0000SEHA | CPI - Rent of primary residence |
+| CUSR0000SEHC | CPI - Owners' equivalent rent |
+| CUSR0000SEHB | CPI - Lodging away from home |
+| CUSR0000SEHF | CPI - Energy services (utilities) |
+
+*Producer Price Index — Construction Inputs:*
+| Series ID | What It Measures |
+|-----------|-----------------|
+| WPU081 | PPI - Lumber and wood products |
+| PCU2371 | PPI - Utility system construction |
+| PCU2361 | PPI - Residential building construction |
+| WPU0553 | PPI - Concrete products |
+| WPU1017 | PPI - Steel mill products |
+
+*Construction Employment:*
+| Series ID | What It Measures |
+|-----------|-----------------|
+| CEU2000000001 | Construction employment (national) |
+| CEU2023610001 | Residential building construction employment |
+| CEU2023620001 | Nonresidential building construction employment |
+| CEU2000000003 | Average hourly earnings - construction |
+| SMU51000002000000001 | Construction employment - Virginia |
+
+**API:** BLS — `https://api.bls.gov/publicAPI/v2/timeseries/data/`
+**Auth:** BLS registration key (free)
+**Cost:** Free
+
+---
+
+## Tool 4: census_acs_query
+
+**Purpose in Housing Context:** THE critical tool for local housing
+data. Census ACS provides rent levels, home values, housing cost
+burden, income distribution, and housing characteristics at county
+and metro area level. No other source gives you this geographic
+granularity for housing affordability.
+
+**Key ACS Tables for Housing:**
+
+| Table | What It Measures | Geography |
+|-------|-----------------|-----------|
+| B25064 | Median gross rent | County, metro, tract |
+| B25077 | Median home value | County, metro, tract |
+| B25070 | Gross rent as % of household income (distribution) | County, metro |
+| B25091 | Mortgage costs as % of household income | County, metro |
+| B25001 | Total housing units | County, metro, tract |
+| B25002 | Occupancy status (occupied vs vacant) | County, metro |
+| B25003 | Tenure (owner vs renter) | County, metro |
+| B25014 | Tenure by persons per room (overcrowding) | County, metro |
+| B19013 | Median household income | County, metro, tract |
+| B25063 | Gross rent (distribution by dollar amount) | County, metro |
+| B25075 | Home value (distribution by dollar amount) | County, metro |
+| DP04 | Housing characteristics profile | County, metro |
+
+**Virginia FIPS codes you'll need:**
+- 51 = Virginia (state)
+- 51013 = Arlington County
+- 51059 = Fairfax County
+- 51760 = Richmond City
+- 51810 = Virginia Beach City
+- 51770 = Roanoke City
+- 47900 = Washington-Arlington-Alexandria MSA
+- 40060 = Richmond MSA
+- 47260 = Virginia Beach-Norfolk MSA
+
+**API:** Census — `https://api.census.gov/data/{year}/acs/acs5`
+**Auth:** Census API key (free, instant registration)
+**Cost:** Free
+
+**Implementation:**
+```python
+async def census_acs_query(
+    table_variables: list[str],
+    geography: str,  # "county:*" or "county:013" or "metropolitan statistical area/micropolitan statistical area:47900"
+    state_fips: str = "51",  # Virginia
+    year: int = 2023,
+    dataset: str = "acs5"  # acs1 for areas >65K pop, acs5 for all
+) -> str:
+    base_url = f"https://api.census.gov/data/{year}/acs/{dataset}"
+    params = {
+        "get": ",".join(table_variables),
+        "for": geography,
+        "in": f"state:{state_fips}",
+        "key": CENSUS_API_KEY,
+    }
+    resp = await httpx.AsyncClient().get(base_url, params=params)
+    return json.dumps(resp.json())
+```
+
+---
+
+## Tool 5: bea_regional_data
+
+**Purpose in Housing Context:** Regional price parities (RPP) —
+tells you how much more/less expensive each metro area is compared
+to the national average. Critical for comparing real (cost-adjusted)
+income across regions and understanding geographic affordability
+variation.
+
+**Key BEA Tables for Housing:**
+
+| Table | What It Measures |
+|-------|-----------------|
+| CAINC1 | Personal income by county |
+| CAINC4 | Personal income and employment by county (detailed) |
+| SARPP | State-level regional price parities |
+| MARPP | Metro-level regional price parities |
+| CAGDP2 | GDP by industry by county (identifies construction sector share) |
+
+**Regional Price Parities are uniquely valuable:**
+- RPP > 100 means more expensive than national average
+- RPP < 100 means cheaper
+- RPP for "rents" specifically tells you housing cost relative to nation
+- Northern Virginia RPP (rents) ≈ 130-140 (30-40% above national avg)
+- Rural Virginia RPP (rents) ≈ 70-80 (20-30% below)
+
+**API:** BEA — `https://apps.bea.gov/api/data/`
+**Auth:** BEA API key (free registration)
+**Cost:** Free
+
+**Implementation:**
+```python
+async def bea_regional_data(
+    table_name: str,  # "CAINC1", "SARPP", "MARPP", "CAGDP2"
+    geo_fips: str,    # "51000" for VA state, "51013" for Arlington
+    year: str = "2023",
+    line_code: str = "1"  # varies by table
+) -> str:
+    params = {
+        "UserID": BEA_API_KEY,
+        "method": "GetData",
+        "datasetname": "Regional",
+        "TableName": table_name,
+        "GeoFIPS": geo_fips,
+        "Year": year,
+        "LineCode": line_code,
+        "ResultFormat": "JSON",
+    }
+    resp = await httpx.AsyncClient().get(
+        "https://apps.bea.gov/api/data/", params=params
+    )
+    return json.dumps(resp.json()["BEAAPI"]["Results"]["Data"])
+```
+
+---
+
+## Tool 6: hud_data
+
+**Purpose in Housing Context:** HUD Fair Market Rents (FMR) are the
+official benchmark rents used by the federal government for housing
+vouchers and affordability calculations. Also provides income limits
+(what counts as "low income" in each area) and housing affordability
+indices.
+
+**Key HUD Datasets:**
+
+| Dataset | What It Measures | Update Freq |
+|---------|-----------------|-------------|
+| Fair Market Rents (FMR) | 40th percentile rent by bedroom count by county/metro | Annual |
+| Income Limits | Low/very-low/extremely-low income thresholds by area | Annual |
+| USPS Vacancy Data | Residential vacancy rates by county (from mail delivery data) | Quarterly |
+| Picture of Subsidized Households | Subsidized housing inventory and characteristics | Annual |
+
+**API:** HUD User — `https://www.huduser.gov/hudapi/public/`
+**Auth:** Token from huduser.gov (free registration)
+**Cost:** Free
+
+**Endpoints:**
+| Endpoint | Returns |
+|----------|---------|
+| `/fmr/statedata/{state}` | FMRs for all counties in state |
+| `/fmr/data/{entity_id}` | FMR for specific county/metro |
+| `/il/statedata/{state}` | Income limits for all counties in state |
+| `/il/data/{entity_id}` | Income limits for specific county/metro |
+| `/usps/{entity_id}?year={y}&quarter={q}` | Vacancy data |
+
+**Implementation:**
+```python
+async def hud_data(
+    dataset: str,    # "fmr", "il", "usps"
+    entity_id: str,  # FIPS code or "VA" for state-level
+    year: int = 2025,
+    quarter: int = None  # only for USPS vacancy data
+) -> str:
+    base = "https://www.huduser.gov/hudapi/public"
+    
+    if dataset == "fmr":
+        if len(entity_id) == 2:  # state abbreviation
+            url = f"{base}/fmr/statedata/{entity_id}"
+        else:
+            url = f"{base}/fmr/data/{entity_id}"
+    elif dataset == "il":
+        if len(entity_id) == 2:
+            url = f"{base}/il/statedata/{entity_id}"
+        else:
+            url = f"{base}/il/data/{entity_id}"
+    elif dataset == "usps":
+        url = f"{base}/usps/{entity_id}"
+        if year and quarter:
+            url += f"?year={year}&quarter={quarter}"
+    
+    headers = {"Authorization": f"Bearer {HUD_TOKEN}"}
+    resp = await httpx.AsyncClient().get(url, headers=headers)
+    return json.dumps(resp.json())
+```
+
+---
+
+## Tool 7: search_openalex
+
+**Purpose in Housing Context:** Find academic research on housing
+market responses to policy changes — rent elasticities, construction
+cost pass-through, housing affordability studies, spatial equilibrium
+models.
+
+**Typical Housing Research Queries:**
+- "minimum wage rent increase housing"
+- "construction cost housing supply elasticity"
+- "housing affordability income elasticity"
+- "rent pass-through operating costs landlord"
+- "spatial equilibrium wages housing costs"
+- "housing supply constraints zoning"
+- "tariff construction material prices housing"
+
+**API:** OpenAlex — `https://api.openalex.org/works`
+**Auth:** None (include email for polite pool)
+**Cost:** Free
+
+---
+
+## Tool 8: search_google_scholar
+
+**Purpose in Housing Context:** Secondary academic search with
+superior relevance ranking. Particularly good for finding the
+canonical housing economics papers (Glaeser, Gyourko, Saiz,
+Albouy, etc.) that define the field.
+
+**Typical Queries:**
+- "housing supply elasticity Saiz"
+- "rent control effects housing quality"
+- "minimum wage housing costs affordability"
+- "construction labor costs housing starts"
+- "income elasticity housing demand"
+
+**API:** SerpAPI — `https://serpapi.com/google-scholar-api`
+**Auth:** SerpAPI key
+**Cost:** Free tier (100/month)
+
+---
+
+## Tool 9: web_search_news
+
+**Purpose in Housing Context:** Find recent housing market data,
+rent reports from industry sources (Zillow, Apartment List, Redfin),
+and real-world outcomes of similar policies on housing markets.
+
+**Typical Queries:**
+- "Virginia rent trends 2026"
+- "Northern Virginia housing market"
+- "Seattle rent increase after minimum wage"
+- "construction costs rising 2026"
+- "Zillow rent index Virginia"
+- "housing starts decline construction labor shortage"
+
+**Industry sources this often surfaces:**
+- Zillow Research (rent indices, home value indices)
+- Apartment List (national rent report)
+- Redfin (market reports)
+- National Association of Realtors (existing home sales)
+- Joint Center for Housing Studies at Harvard (annual report)
+- Urban Institute housing research
+
+**API:** Tavily — `https://api.tavily.com/search`
+**Auth:** Tavily API key
+**Cost:** Free tier (1000/month, shared with other agents)
+
+---
+
+## Tool 10: fetch_document_text
+
+**Purpose in Housing Context:** Read full housing research reports,
+CBO analyses of housing provisions, HUD reports, and academic papers
+found by search tools. Housing policy research from Joint Center for
+Housing Studies, Urban Institute, and Brookings is often in long-form
+reports where key findings are buried deep.
+
+**Common URLs this tool fetches:**
+- Joint Center for Housing Studies annual report
+- Urban Institute housing policy briefs
+- CBO reports with housing components
+- Open-access housing economics papers (from OpenAlex URLs)
+- State housing authority reports
+- Freddie Mac / Fannie Mae economic research
+
+**API:** Direct HTTP + BeautifulSoup/pdfplumber
+**Auth:** None
+**Cost:** Free
+
+---
+
+## Tool 11: search_cbo_reports
+
+**Purpose in Housing Context:** CBO occasionally scores policies
+with significant housing implications — housing voucher expansions,
+LIHTC modifications, infrastructure bills with housing components,
+or broad policies where CBO models the housing market effects.
+
+**Typical Queries:**
+- "housing affordability CBO"
+- "minimum wage housing costs"
+- "infrastructure construction costs housing"
+- "Low Income Housing Tax Credit"
+
+**API:** Tavily (scoped to cbo.gov)
+**Auth:** Tavily API key (shared)
+**Cost:** Free tier (shared allocation)
+
+---
+
+## Summary Table
+
+| # | Tool | Primary API | Auth Needed | Cost | Housing-Specific Use |
+|---|------|------------|-------------|------|---------------------|
+| 1 | fred_search | FRED | FRED key | Free | Discover housing series IDs |
+| 2 | fred_get_series | FRED | FRED key | Free | Mortgage rates, home prices, starts, vacancy, CPI-shelter |
+| 3 | bls_get_data | BLS | BLS key | Free | CPI shelter components, construction PPI, construction wages |
+| 4 | census_acs_query | Census | Census key | Free | Rent/home values by county, cost burden, income, tenure |
+| 5 | bea_regional_data | BEA | BEA key | Free | Regional price parities, personal income by county |
+| 6 | hud_data | HUD | HUD token | Free | Fair market rents, income limits, vacancy rates |
+| 7 | search_openalex | OpenAlex | None | Free | Housing economics research |
+| 8 | search_google_scholar | SerpAPI | SerpAPI key | Free tier | Canonical housing papers, relevance-ranked |
+| 9 | web_search_news | Tavily | Tavily key | Free tier | Industry rent reports, recent market data, analogous cases |
+| 10 | fetch_document_text | HTTP | None | Free | Read full reports and papers |
+| 11 | search_cbo_reports | Tavily | Tavily key | Free tier | CBO housing-related analyses |
+
+**API Keys Required (incremental beyond Policy Analyst):**
+- Census API key (free, instant) — if not already obtained
+- BEA API key (free, instant) — if not already obtained
+- HUD User token (free, registration required)
+
+Everything else reuses keys from the Policy Analyst agent.
+
+---
+
+## Tools NOT Included (Rationale)
+
+| Tool Considered | Why Excluded |
+|----------------|--------------|
+| Zillow API | Zillow killed their free API in 2021. Data accessible via web_search_news instead. |
+| Redfin API | No public API. Data accessible via web_search_news. |
+| Realtor.com API | Requires partnership agreement. Not feasible for hackathon. |
+| CoreLogic | Paid enterprise product ($$$). Academic-only access. |
+| CoStar / Apartments.com | Paid commercial product. Not accessible. |
+| NMHC Rent Survey | Members only. Key findings surface via web_search_news. |
+
+The free government data stack (Census + HUD + FRED + BLS + BEA) covers
+roughly 85% of what these paid sources provide for policy analysis
+purposes. The paid sources add granularity (zip-code level, monthly
+frequency, individual property data) that matters for real estate
+investment but is unnecessary for policy impact analysis.
