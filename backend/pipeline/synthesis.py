@@ -314,13 +314,74 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "lightning_payments": state.payments,
     }
 
+    # Build impact_dashboard from sector direct_effects + challenge survival info
+    survived_claims = set()
+    for cs in challenge_survival:
+        if cs.survived:
+            survived_claims.add(cs.challenge.target_claim.claim)
+
+    impact_dashboard = []
+    for report in state.sector_reports:
+        for claim in report.direct_effects:
+            # Determine direction from mechanism/effect text
+            effect_lower = (claim.effect + " " + claim.mechanism).lower()
+            if any(w in effect_lower for w in ("increase", "rise", "grow", "higher", "boost", "gain")):
+                direction = "increase"
+            elif any(w in effect_lower for w in ("decrease", "decline", "fall", "lower", "reduce", "drop", "loss")):
+                direction = "decline"
+            elif any(w in effect_lower for w in ("distort", "misalloc", "perverse")):
+                direction = "distortionary"
+            else:
+                direction = "mixed"
+
+            # Determine status from confidence + direction
+            if claim.confidence.value == "empirical":
+                status = "works" if direction in ("increase", "decline") else "tradeoff"
+            elif claim.confidence.value == "speculative":
+                status = "doesnt_work"
+            else:
+                status = "tradeoff"
+
+            survived = "yes" if claim.claim in survived_claims else ("no" if any(
+                cs.challenge.target_claim.claim == claim.claim for cs in challenge_survival if not cs.survived
+            ) else "partial")
+
+            impact_dashboard.append({
+                "category": claim.claim[:80],
+                "direction": direction,
+                "magnitude": claim.effect[:60] if claim.effect else "TBD",
+                "confidence": claim.confidence.value.upper(),
+                "survived_challenge": survived,
+                "status": status,
+                "sectors": [report.sector],
+            })
+
+    # Build agreed_findings with frontend-expected shape (claim + agreeing_agents)
+    agreed_findings_reshaped = [
+        {
+            "claim": {
+                "claim": a.finding,
+                "cause": "",
+                "effect": "",
+                "mechanism": "",
+                "confidence": a.confidence.value.upper(),
+                "evidence": [],
+                "assumptions": [],
+                "sensitivity": None,
+            },
+            "agreeing_agents": a.supporting_agents,
+        }
+        for a in agreed
+    ]
+
     # Build final report with frontend-expected shape
     report_data = {
         "policy_summary": policy_summary,
         "unified_impact": unified_impact_reshaped,
+        "impact_dashboard": impact_dashboard,
         "sankey_data": sankey.model_dump(),
         "disagreements": [d.model_dump() for d in disagreements],
-        "agreed_findings": [a.model_dump() for a in agreed],
+        "agreed_findings": agreed_findings_reshaped,
         "challenge_survival": challenge_survival_reshaped,
         "metadata": metadata,
     }

@@ -507,13 +507,19 @@ async def _run_one_sector(
         logger.error(f"Sector {sector} LLM failed: {traceback.format_exc()}")
         report = _fallback_report(sector, state)
 
-    # Emit completion
+    # Emit completion — uppercase confidence values for frontend compatibility
+    report_dict = report.model_dump()
+    for claim_list_key in ("direct_effects", "second_order_effects", "feedback_loops"):
+        for claim_dict in report_dict.get(claim_list_key, []):
+            if "confidence" in claim_dict:
+                claim_dict["confidence"] = claim_dict["confidence"].upper()
+
     await emit({
         "type": "sector_agent_complete",
         "agent": sector,
         "data": {
             "agent": sector.title(),
-            "report": report.model_dump(),
+            "report": report_dict,
             "sector": sector,
             "direct_effects": len(report.direct_effects),
             "second_order_effects": len(report.second_order_effects),
