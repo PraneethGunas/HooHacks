@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import SankeyDiagram from "@/components/SankeyDiagram";
+import type { SynthesisReport } from "@/types/pipeline";
 
 // ─── Types (permissive — API sends inconsistent casing) ───────────────────────
 
@@ -249,9 +249,23 @@ function buildFallbackSankey(categories: CategoryItem[] | null | undefined): San
 function ConfBadge({ c }: { c: unknown }) {
   const s = getConfStyle(c);
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", s.pill)}>
-      <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", s.dot)} />
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border font-medium relative cursor-help",
+        large ? "px-3.5 py-1 text-sm gap-2" : "px-2.5 py-0.5 text-xs",
+        s.pill,
+      )}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <span className={cn(large ? "h-2 w-2" : "h-1.5 w-1.5", "rounded-full", s.dot)} />
+      {large ? null : <span className="ml-1.5" />}
       {s.label}
+      {showTooltip && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-black/95 border border-white/10 px-3 py-2 text-[11px] text-white/70 leading-relaxed z-50 pointer-events-none shadow-lg">
+          {tooltipText[s.label] ?? "Confidence assessment from multi-agent analysis"}
+        </span>
+      )}
     </span>
   );
 }
@@ -273,15 +287,18 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
+// Section headings — readable, not decorative
 function SectionHeading({ label, sub }: { label: string; sub?: string }) {
   return (
     <div className="mb-5">
       <h3 className="text-base font-semibold text-white/85">{label}</h3>
       {sub && <p className="mt-0.5 text-sm text-white/45">{sub}</p>}
+      {sub && <p className="mt-0.5 text-sm text-white/45">{sub}</p>}
     </div>
   );
 }
 
+// Step indicator for the page narrative flow
 function StepBadge({ n, label }: { n: number; label: string }) {
   return (
     <div className="mb-2 flex items-center gap-3">
@@ -294,6 +311,7 @@ function StepBadge({ n, label }: { n: number; label: string }) {
   );
 }
 
+// ─── 1: Hero header ───────────────────────────────────────────────────────────
 // ─── 1: Hero header ───────────────────────────────────────────────────────────
 
 function PolicyHeader({ report }: { report: FullReport }) {
@@ -362,6 +380,18 @@ function PolicyHeader({ report }: { report: FullReport }) {
         <div className="flex h-3 overflow-hidden rounded-full bg-white/8">
           <div className="bg-emerald-500/65 transition-all duration-700" style={{ width: `${posW}%` }} />
           <div className="flex-1 bg-red-500/45" />
+        <div className="flex h-3 overflow-hidden rounded-full bg-white/8">
+          <div className="bg-emerald-500/65 transition-all duration-700" style={{ width: `${posW}%` }} />
+          <div className="flex-1 bg-red-500/45" />
+        </div>
+        <div className="flex justify-between text-xs text-white/35">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-500/65" />Gains
+          </span>
+          <span className="flex items-center gap-1.5">
+            Costs &amp; risks
+            <span className="h-2 w-2 rounded-full bg-red-500/45" />
+          </span>
         </div>
         <div className="flex justify-between text-xs text-white/35">
           <span className="flex items-center gap-1.5">
@@ -377,6 +407,7 @@ function PolicyHeader({ report }: { report: FullReport }) {
   );
 }
 
+// ─── 2: KPI strip ─────────────────────────────────────────────────────────────
 // ─── 2: KPI strip ─────────────────────────────────────────────────────────────
 
 function KpiStrip({ metrics }: { metrics: HeadlineMetric[] | null | undefined }) {
@@ -418,7 +449,7 @@ function KpiStrip({ metrics }: { metrics: HeadlineMetric[] | null | undefined })
 
 // ─── 3: Waterfall chart ───────────────────────────────────────────────────────
 
-function WaterfallChart({ data }: { data: WaterfallData }) {
+function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
 
   const steps = safeArr(data?.steps).filter((s) => {
@@ -770,10 +801,15 @@ function TimelineChart({
           );
         })}
       </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
+// ─── 6: Winners & Losers ──────────────────────────────────────────────────────
 // ─── 6: Winners & Losers ──────────────────────────────────────────────────────
 
 type CardType = "winner" | "loser" | "mixed";
@@ -870,6 +906,7 @@ function WinnersLosers({ data }: { data: NonNullable<FullReport["winners_losers"
               tab === t.key ? t.activeClass : "border-white/10 text-white/40 hover:text-white/65")}>
             {t.label}
             <span className="ml-1.5 text-xs opacity-60">({t.count})</span>
+            <span className="ml-1.5 text-xs opacity-60">({t.count})</span>
           </button>
         ))}
       </div>
@@ -887,6 +924,7 @@ function WinnersLosers({ data }: { data: NonNullable<FullReport["winners_losers"
   );
 }
 
+// ─── 7: Geographic impact ─────────────────────────────────────────────────────
 // ─── 7: Geographic impact ─────────────────────────────────────────────────────
 
 function GeographicImpact({ regions }: { regions: GeographicRegion[] | null | undefined }) {
@@ -1216,6 +1254,8 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
             />
             <WinnersLosers data={report.winners_losers!} />
           </Card>
+        </>
+      )}
         </>
       )}
 

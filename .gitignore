@@ -46,3 +46,4 @@ Thumbs.db
 
 # Docker volumes (local dev)
 docker/data/
+debug_output/

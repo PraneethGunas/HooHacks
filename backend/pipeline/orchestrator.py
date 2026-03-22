@@ -28,15 +28,21 @@ TO SWAP IN LANGGRAPH (Rudra):
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from backend.models.pipeline import (
     SectorReport,
     SynthesisReport,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Type alias for the SSE event callback
@@ -95,9 +101,23 @@ async def run_pipeline(
         start_time=time.time(),
     )
 
+    # --- Event logger: dump every SSE event to debug_output/<session_id>.jsonl ---
+    debug_dir = Path(__file__).resolve().parent.parent.parent / "debug_output"
+    debug_dir.mkdir(exist_ok=True)
+    debug_file = debug_dir / f"{state.session_id}.jsonl"
+    logger.info(f"Pipeline events will be saved to {debug_file}")
+
+    def _log_event(event: dict[str, Any]) -> None:
+        try:
+            with open(debug_file, "a") as f:
+                f.write(json.dumps(event, default=str) + "\n")
+        except Exception:
+            pass  # never let logging break the pipeline
+
     async def _emit(event: dict[str, Any]) -> None:
+        event["timestamp"] = time.time()
+        _log_event(event)
         if emit:
-            event["timestamp"] = time.time()
             await emit(event)
 
     # Import stages here to avoid circular imports
@@ -143,6 +163,28 @@ async def run_pipeline(
                 "stage_times": {k: round(v, 1) for k, v in state.stage_times.items()},
             },
         })
+
+        # Dump final state summary
+        try:
+            summary = {
+                "session_id": state.session_id,
+                "query": state.query,
+                "policy_type": state.policy_type,
+                "policy_params": state.policy_params,
+                "briefing_keys": list(state.briefing.keys()) if state.briefing else [],
+                "num_tool_calls": len(state.tool_calls),
+                "num_sector_reports": len(state.sector_reports),
+                "sector_report_sectors": [r.sector if hasattr(r, "sector") else str(r)[:80] for r in state.sector_reports],
+                "has_synthesis": state.synthesis is not None,
+                "stage_times": {k: round(v, 1) for k, v in state.stage_times.items()},
+                "payments": state.payments,
+            }
+            state_file = debug_dir / f"{state.session_id}_state.json"
+            with open(state_file, "w") as f:
+                json.dump(summary, f, indent=2, default=str)
+            logger.info(f"Pipeline state saved to {state_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save pipeline state: {e}")
 
     except Exception as e:
         await _emit({
