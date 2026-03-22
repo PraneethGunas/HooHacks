@@ -113,6 +113,37 @@ function AgentRow({
   );
 }
 
+/** Single-line animated ticker for analyst real-time events */
+function AnalystTicker({ events }: { events: { tool: string; query: string }[] }) {
+  const latest = events[events.length - 1];
+  const [displayText, setDisplayText] = useState("");
+  const [fadeKey, setFadeKey] = useState(0);
+
+  useEffect(() => {
+    if (!latest) return;
+    // Show the query text (human-readable from backend), fall back to tool name
+    const text = latest.query || latest.tool;
+    setDisplayText(text);
+    setFadeKey((k) => k + 1);
+  }, [latest]);
+
+  if (!displayText) return null;
+
+  return (
+    <div className="mt-1.5 h-5 overflow-hidden relative">
+      <div
+        key={fadeKey}
+        className="absolute inset-0 flex items-center gap-1.5 text-[11px] animate-ticker-in"
+        style={{ fontFamily: "var(--font-mono), monospace" }}
+      >
+        <span className="inline-block h-1 w-1 rounded-full bg-sky-400/70 shrink-0 animate-pulse" />
+        <span className="text-white/50 truncate">{displayText}</span>
+        <span className="text-white/20 ml-auto shrink-0 text-[10px] tabular-nums">{events.length}</span>
+      </div>
+    </div>
+  );
+}
+
 function AgentModeBadge({ mode }: { mode: "agentic" | "single_shot" | null }) {
   if (!mode) return null;
   const isAgentic = mode === "agentic";
@@ -414,8 +445,7 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
     ? `task_type: ${state.classifier.task_type} · scope: ${state.classifier.policy_params.scope ?? "unknown"}`
     : "waiting for classifier...";
 
-  const analystTool = state.analystToolCalls[state.analystToolCalls.length - 1];
-  const analystToolText = analystTool ? `${analystTool.tool}("${analystTool.query}")` : undefined;
+  const analystRunning = !state.analystComplete && state.status === "running" && !!state.classifier;
 
   const sectorAgents = Object.entries(state.sectorAgents);
   const allSectorsComplete = sectorAgents.length > 0 && sectorAgents.every(([, data]) => data.status === "complete");
@@ -466,16 +496,31 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
         />
 
         <StageLabel status={stage1Status}>Stage 1 - Analyst</StageLabel>
-        <AgentRow
-          name="Analyst agent"
-          status={state.analystComplete ? "complete" : state.status === "running" ? "running" : "pending"}
-          description={
-            state.analystComplete
-              ? `${state.analystComplete.tool_calls_made} tool calls · ${state.analystComplete.sources_found} sources`
-              : "Collecting baseline evidence and structured context"
-          }
-          toolCall={analystToolText}
-        />
+        <div className="flex gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card">
+          <Avatar letter="A" status={state.analystComplete ? "complete" : analystRunning ? "running" : "pending"} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">Analyst agent</div>
+              <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">
+                {state.analystComplete ? "complete" : analystRunning ? "running" : "pending"}
+              </span>
+              {analystRunning && state.analystToolCalls.length > 0 && (
+                <span className="text-[10px] text-white/30 tabular-nums ml-auto">{state.analystToolCalls.length} events</span>
+              )}
+            </div>
+            <div className="text-xs text-white/55">
+              {state.analystComplete
+                ? (() => {
+                    const ac = state.analystComplete as any;
+                    const tools = ac.tool_calls_made || ac.tools_called || state.analystToolCalls.length;
+                    const sources = ac.sources_found || ac.tools_succeeded || state.analystToolCalls.length;
+                    return `${tools} tool calls · ${sources} sources`;
+                  })()
+                : "5-phase agentic analysis: policy spec → baseline → transmission → evidence → briefing"}
+            </div>
+            {analystRunning && <AnalystTicker events={state.analystToolCalls} />}
+          </div>
+        </div>
 
         {state.lightningPayments.length > 0 && (
           <LightningLog payments={state.lightningPayments} />
@@ -511,11 +556,48 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
         </div>
 
         <StageLabel status={stage3Status}>Stage 3 - Synthesis</StageLabel>
-        <AgentRow
-          name="Synthesis agent"
-          status={state.synthesis ? "complete" : state.status === "running" && allSectorsComplete ? "running" : "pending"}
-          description={state.synthesis ? "Unified report ready" : "Building final synthesis report"}
-        />
+        <div className="flex gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card">
+          <Avatar letter="S" status={state.synthesis ? "complete" : state.status === "running" && allSectorsComplete ? "running" : "pending"} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">Synthesis agent</div>
+              <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">
+                {state.synthesis ? "complete" : state.status === "running" && allSectorsComplete ? "running" : "pending"}
+              </span>
+              {state.synthesisPhase && !state.synthesis && (
+                <span className="text-[10px] text-white/30 tabular-nums ml-auto">phase {state.synthesisPhase.phase}/5</span>
+              )}
+            </div>
+            <div className="text-xs text-white/55">
+              {state.synthesis
+                ? "Unified report ready"
+                : state.synthesisPhase
+                  ? state.synthesisPhase.name
+                  : "5-phase synthesis: audit → impact → winners → narrative → payload"}
+            </div>
+            {state.synthesisPhase && !state.synthesis && (
+              <div className="mt-2 flex gap-1">
+                {["Consistency Audit", "Net Household Impact", "Winners & Losers", "Narrative & Timeline", "Analytics Payload"].map((step, i) => (
+                  <div
+                    key={step}
+                    className={cn(
+                      "group relative flex-1 h-1.5 rounded-full transition-colors duration-300",
+                      i + 1 < state.synthesisPhase!.phase
+                        ? "bg-rose-400/80"
+                        : i + 1 === state.synthesisPhase!.phase
+                          ? state.synthesisPhase!.status === "complete" ? "bg-rose-400/80" : "bg-rose-400/60 animate-pulse"
+                          : "bg-white/10",
+                    )}
+                  >
+                    <div className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-0.5 text-[9px] text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                      {step}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
         {state.synthesis && (
           <div className="mt-3 flex justify-end">
