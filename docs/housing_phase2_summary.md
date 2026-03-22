@@ -1,0 +1,9 @@
+# Housing Phase 2: Baseline Summary (LLM-compressed)
+
+In the United States, January 2026 saw annualized housing starts at 1,487,000 units, fluctuating with a recent increase, while building permits were 1,376,000 units, also fluctuating but with a recent decrease. The rental vacancy rate was 7.2% in Q4 2025 (October), showing a slight upward trend and indicating a loosening rental market nationally. Construction employment in February 2026 was 8,011,000 employees, a slight decrease from late 2025 peaks but generally stable, with average hourly wages at $40.66/hour, on a steady upward trend.
+
+Demand metrics show the total population at 343,157,450 in December 2025, with a steady increase. Real median household income was $83,730 in 2024, trending upward since 2022. The 30-year fixed rate mortgage average was 6.22% on March 19, 2026, fluctuating with a recent slight increase. The homeownership rate was 65.7% in Q4 2025 (October), remaining relatively stable.
+
+Price metrics indicate a median gross rent of $1,268/month in 2022, generally increasing. The median sales price of houses sold was $405,300 in Q4 2025 (October), fluctuating with a recent slight decrease. The CPI for rent of primary residence in the U.S. City Average was 441.865 (Index 1982-1984=100) in February 2026, showing a steady upward trend. The estimated median rent-to-income ratio was 19.14% in 2022.
+
+Overall market tightness is moderate. The national rental vacancy rate of 7.2% suggests a balanced market, though this is an aggregate. Housing starts and permits show some volatility. Home prices and rents have generally been increasing, but home prices have seen recent fluctuations. The estimated median rent-to-income ratio of 19.14% suggests affordability for the median household, but masks significant burdens for lower-income households and in high-cost regions. Data gaps include a detailed, current national median rent-to-income ratio and specific sub-market assessments.
