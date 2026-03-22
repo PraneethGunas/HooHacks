@@ -1,621 +1,942 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { cn, formatDuration, titleCase, truncate } from "@/lib/utils";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { cn, formatDuration, truncate } from "@/lib/utils";
 import type { LightningPaymentEvent, PipelineState, ThinkingStep } from "@/types/pipeline";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AgentFeed — "Spotlight + Timeline" layout
+   Left rail: vertical agent timeline
+   Main area: full-width thinking stream for the focused agent
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 interface AgentFeedProps {
   state: PipelineState;
   onViewReport: () => void;
 }
 
-// Single-shot agents: 4 generic steps
-const SINGLE_SHOT_PROCESSES: Record<string, string[]> = {
-  Labor: ["Pull labor market baselines", "Estimate wage pass-through", "Check employment elasticity", "Draft labor report"],
-  Business: ["Scan margin exposure", "Model cost absorption", "Estimate hiring adjustment", "Draft business report"],
+// ─── Agent identifiers used throughout ────────────────────────────────────
+type AgentId = "classifier" | "analyst" | "lightning" | "Labor" | "Housing" | "Consumer" | "Business" | "synthesis";
+
+const AGENT_ORDER: AgentId[] = ["classifier", "analyst", "lightning", "Labor", "Housing", "Consumer", "Business", "synthesis"];
+
+/** Only actual agents shown in the left rail (Lightning is a payment layer, shown separately) */
+const RAIL_AGENTS: AgentId[] = ["classifier", "analyst", "Labor", "Housing", "Consumer", "Business", "synthesis"];
+
+const AGENT_META: Record<AgentId, { label: string; icon: string; color: string; description: string }> = {
+  classifier:  { label: "Classifier",  icon: "C", color: "sky",    description: "Parsing policy type & parameters" },
+  analyst:     { label: "Analyst",     icon: "A", color: "blue",   description: "5-phase data gathering & briefing" },
+  lightning:   { label: "Lightning",   icon: "⚡", color: "amber",  description: "L402 premium data payments" },
+  Labor:       { label: "Labor",       icon: "L", color: "emerald", description: "Employment, wages & workforce" },
+  Housing:     { label: "Housing",     icon: "H", color: "purple", description: "Housing demand, rents & mobility" },
+  Consumer:    { label: "Consumer",    icon: "Co", color: "pink",   description: "Prices, purchasing power & spending" },
+  Business:    { label: "Business",    icon: "B", color: "orange", description: "Margins, closures & automation" },
+  synthesis:   { label: "Synthesis",   icon: "S", color: "rose",   description: "5-phase aggregation & report" },
 };
 
-// Agentic agents: 5 real LangGraph phases
-const AGENTIC_PROCESSES: Record<string, string[]> = {
-  Housing: [
-    "Identify transmission pathways",
-    "Gather housing market baseline",
-    "Estimate impact magnitudes",
-    "Distributional & temporal analysis",
-    "Build affordability scorecard",
-  ],
-  Consumer: [
-    "Identify price shock entry points",
-    "Estimate pass-through rates",
-    "Geographic & behavioral analysis",
-    "Net purchasing power calculation",
-    "Build consumer impact scorecard",
-  ],
-};
+const SYNTHESIS_PHASES = ["Consistency Audit", "Net Household Impact", "Winners & Losers", "Narrative & Timeline", "Analytics Payload"];
 
-function getProcesses(name: string, agentMode: "agentic" | "single_shot" | null): string[] {
-  if (agentMode === "agentic" && AGENTIC_PROCESSES[name]) return AGENTIC_PROCESSES[name];
-  if (SINGLE_SHOT_PROCESSES[name]) return SINGLE_SHOT_PROCESSES[name];
-  if (AGENTIC_PROCESSES[name]) return AGENTIC_PROCESSES[name];
-  return ["Gather evidence", "Run model checks", "Draft report", "Finalize output"];
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
-function StageLabel({
-  children,
-  status,
-}: {
-  children: string;
-  status: "pending" | "running" | "complete";
-}) {
-  const lightClass =
-    status === "complete"
-      ? "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.7)]"
-      : status === "running"
-        ? "bg-sky-400 animate-pulse shadow-[0_0_12px_rgba(56,189,248,0.85)]"
-        : "bg-amber-400/80 shadow-[0_0_8px_rgba(251,191,36,0.5)]";
-
-  return (
-    <div className="text-[10px] font-medium text-white/30 tracking-widest uppercase mb-2 mt-4 flex items-center gap-2">
-      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", lightClass)} />
-      {children}
-    </div>
-  );
-}
-
-function Avatar({
-  letter,
-  status,
-}: {
-  letter: string;
-  status: "pending" | "running" | "complete";
-}) {
-  return (
-    <div
-      className={cn(
-        "h-7 w-7 rounded-full grid place-items-center text-[11px] border border-white/10",
-        status === "complete" && "bg-green-900/40 text-green-400",
-        status === "running" && "bg-amber-900/40 text-amber-400 animate-pulse",
-        status === "pending" && "bg-white/5 text-white/30",
-      )}
-    >
-      {letter}
-    </div>
-  );
-}
-
-function AgentRow({
-  name,
-  status,
-  description,
-  toolCall,
-}: {
-  name: string;
-  status: "pending" | "running" | "complete";
-  description: string;
-  toolCall?: string;
-}) {
-  return (
-    <div className="flex gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card">
-      <Avatar letter={name[0] ?? "?"} status={status} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-medium">{name}</div>
-          <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">{status}</span>
-        </div>
-        <div className="text-xs text-white/55">{description}</div>
-        {toolCall && (
-          <div className="mt-1 text-[11px] text-white/50" style={{ fontFamily: "var(--font-mono), monospace" }}>
-            {truncate(toolCall, 80)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Single-line animated ticker for analyst real-time events */
-function AnalystTicker({ events }: { events: { tool: string; query: string }[] }) {
-  const latest = events[events.length - 1];
-  const [displayText, setDisplayText] = useState("");
-  const [fadeKey, setFadeKey] = useState(0);
-
-  useEffect(() => {
-    if (!latest) return;
-    // Show the query text (human-readable from backend), fall back to tool name
-    const text = latest.query || latest.tool;
-    setDisplayText(text);
-    setFadeKey((k) => k + 1);
-  }, [latest]);
-
-  if (!displayText) return null;
-
-  return (
-    <div className="mt-1.5 h-5 overflow-hidden relative">
-      <div
-        key={fadeKey}
-        className="absolute inset-0 flex items-center gap-1.5 text-[11px] animate-ticker-in"
-        style={{ fontFamily: "var(--font-mono), monospace" }}
-      >
-        <span className="inline-block h-1 w-1 rounded-full bg-sky-400/70 shrink-0 animate-pulse" />
-        <span className="text-white/50 truncate">{displayText}</span>
-        <span className="text-white/20 ml-auto shrink-0 text-[10px] tabular-nums">{events.length}</span>
-      </div>
-    </div>
-  );
-}
-
-function AgentModeBadge({ mode }: { mode: "agentic" | "single_shot" | null }) {
-  if (!mode) return null;
-  const isAgentic = mode === "agentic";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-1.5 py-[1px] text-[9px] font-medium leading-tight",
-        isAgentic
-          ? "border border-purple-400/30 bg-purple-500/15 text-purple-300"
-          : "border border-white/10 bg-white/5 text-white/40",
-      )}
-    >
-      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", isAgentic ? "bg-purple-400" : "bg-white/30")} />
-      {isAgentic ? "Multi-phase" : "Single-shot"}
-    </span>
-  );
-}
-
-// Icon for each thinking step type
-function ThinkingIcon({ type }: { type: ThinkingStep["stepType"] }) {
-  switch (type) {
-    case "phase_start": return <span className="text-purple-400">▸</span>;
-    case "tool_call": return <span className="text-sky-400">⚡</span>;
-    case "tool_result": return <span className="text-green-400">✓</span>;
-    case "reasoning": return <span className="text-amber-400 animate-pulse">●</span>;
-    case "reasoning_chunk": return <span className="text-amber-300">↳</span>;
-    case "phase_complete": return <span className="text-green-400">✔</span>;
-    default: return <span className="text-white/30">·</span>;
+function getAgentStatus(id: AgentId, state: PipelineState): "pending" | "running" | "complete" {
+  switch (id) {
+    case "classifier":
+      return state.classifier ? "complete" : (state.classifierThinkingSteps.length > 0 || state.status === "running") ? "running" : "pending";
+    case "analyst":
+      return state.analystComplete ? "complete" : (state.status === "running" && !!state.classifier) ? "running" : "pending";
+    case "lightning":
+      if (state.lightningPayments.length === 0) {
+        // Show running after analyst completes and before sectors start
+        if (state.analystComplete && !Object.values(state.sectorAgents).some(a => a.status !== "pending")) return "running";
+        return "pending";
+      }
+      return state.lightningPayments.every(p => p.status === "paid" || p.status === "failed") ? "complete" : "running";
+    case "synthesis":
+      return state.synthesis ? "complete" : (state.synthesisPhase ? "running" : "pending");
+    default: {
+      const sa = state.sectorAgents[id];
+      return sa?.status ?? "pending";
+    }
   }
 }
 
-function ThinkingFeed({ steps, isRunning }: { steps: ThinkingStep[]; isRunning: boolean }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+function getActiveAgent(state: PipelineState): AgentId {
+  // Return the currently most interesting agent
+  if (!state.classifier && state.status === "running") return "classifier";
+  if (!state.analystComplete && state.classifier && state.status === "running") return "analyst";
+  if (state.analystComplete && state.lightningPayments.some(p => p.status === "paying")) return "lightning";
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  // During sector phase, pick the one with most recent activity
+  const runningAgents = (["Labor", "Housing", "Consumer", "Business"] as AgentId[]).filter(
+    id => state.sectorAgents[id]?.status === "running"
+  );
+  if (runningAgents.length > 0) {
+    // Pick the one with the most thinking steps (most active)
+    let best = runningAgents[0];
+    let bestSteps = 0;
+    for (const id of runningAgents) {
+      const steps = state.sectorAgents[id]?.thinkingSteps.length ?? 0;
+      if (steps > bestSteps) { best = id; bestSteps = steps; }
     }
-  }, [steps.length]);
+    return best;
+  }
 
-  if (steps.length === 0) return null;
+  if (state.synthesisPhase && !state.synthesis) return "synthesis";
+  if (state.lightningPayments.length > 0 && !Object.values(state.sectorAgents).some(a => a.status !== "pending")) return "lightning";
+
+  return "analyst"; // fallback
+}
+
+/** Build a unified thinking stream for any agent */
+interface StreamEntry {
+  id: string;
+  type: "phase" | "tool" | "result" | "reasoning" | "info" | "payment" | "complete";
+  content: string;
+  detail?: string;
+  timestamp: number;
+}
+
+function buildStream(agentId: AgentId, state: PipelineState): StreamEntry[] {
+  const entries: StreamEntry[] = [];
+
+  switch (agentId) {
+    case "classifier": {
+      // Show live thinking steps if available
+      if (state.classifierThinkingSteps.length > 0) {
+        for (const step of state.classifierThinkingSteps) {
+          entries.push({
+            id: `cls-ts-${step.id}`,
+            type: step.stepType === "phase_start" ? "phase"
+              : step.stepType === "tool_call" ? "tool"
+              : step.stepType === "tool_result" ? "result"
+              : step.stepType === "phase_complete" ? "complete"
+              : "reasoning",
+            content: step.content,
+            detail: step.tool,
+            timestamp: step.timestamp,
+          });
+        }
+      }
+      // Append classifier result data once complete
+      if (state.classifier) {
+        entries.push({ id: "cls-type", type: "info", content: `Policy type: ${state.classifier.task_type}`, timestamp: Date.now() });
+        const params = state.classifier.policy_params;
+        if (params) {
+          Object.entries(params).forEach(([k, v]) => {
+            if (v) entries.push({ id: `cls-p-${k}`, type: "result", content: `${k}: ${v}`, timestamp: Date.now() });
+          });
+        }
+      }
+      break;
+    }
+
+    case "analyst": {
+      // Prefer rich thinking steps if available, fall back to basic tool calls
+      if (state.analystThinkingSteps.length > 0) {
+        for (const step of state.analystThinkingSteps) {
+          entries.push({
+            id: `an-ts-${step.id}`,
+            type: step.stepType === "phase_start" ? "phase"
+              : step.stepType === "tool_call" ? "tool"
+              : step.stepType === "tool_result" ? "result"
+              : step.stepType === "phase_complete" ? "complete"
+              : "reasoning",
+            content: step.content,
+            detail: step.tool,
+            timestamp: step.timestamp,
+          });
+        }
+      } else {
+        for (let i = 0; i < state.analystToolCalls.length; i++) {
+          const tc = state.analystToolCalls[i];
+          entries.push({
+            id: `an-tc-${i}`,
+            type: "tool",
+            content: tc.tool,
+            detail: tc.query,
+            timestamp: Date.now(),
+          });
+        }
+      }
+      if (state.analystComplete) {
+        const ac = state.analystComplete as any;
+        entries.push({
+          id: "an-done",
+          type: "complete",
+          content: `Briefing assembled — ${ac.tool_calls_made ?? ac.tools_called ?? state.analystToolCalls.length} tool calls, ${ac.sources_found ?? state.analystToolCalls.length} sources`,
+          timestamp: Date.now(),
+        });
+      }
+      break;
+    }
+
+    case "lightning": {
+      for (let i = 0; i < state.lightningPayments.length; i++) {
+        const p = state.lightningPayments[i];
+        entries.push({
+          id: `ln-${i}-${p.status}`,
+          type: "payment",
+          content: p.service,
+          detail: p.status === "paying"
+            ? `Paying invoice... ${p.invoice_amount_sats} sats`
+            : p.status === "paid"
+              ? `Paid ${p.invoice_amount_sats} sats (${Math.round(p.duration_ms)}ms)`
+              : `Failed: ${(p as any).error ?? "unknown"}`,
+          timestamp: Date.now(),
+        });
+      }
+      break;
+    }
+
+    case "synthesis": {
+      // Prefer rich thinking steps if available
+      if (state.synthesisThinkingSteps.length > 0) {
+        for (const step of state.synthesisThinkingSteps) {
+          entries.push({
+            id: `syn-ts-${step.id}`,
+            type: step.stepType === "phase_start" ? "phase"
+              : step.stepType === "tool_call" ? "tool"
+              : step.stepType === "tool_result" ? "result"
+              : step.stepType === "phase_complete" ? "complete"
+              : "reasoning",
+            content: step.content,
+            detail: step.tool,
+            timestamp: step.timestamp,
+          });
+        }
+      } else if (state.synthesisPhase) {
+        // Fallback to phase-only events
+        for (let i = 1; i <= state.synthesisPhase.phase; i++) {
+          const isComplete = i < state.synthesisPhase.phase || (i === state.synthesisPhase.phase && state.synthesisPhase.status === "complete");
+          entries.push({
+            id: `syn-ph-${i}-${isComplete ? "done" : "run"}`,
+            type: isComplete ? "complete" : "phase",
+            content: `Phase ${i}: ${SYNTHESIS_PHASES[i - 1] ?? "Processing"}`,
+            detail: isComplete ? "Complete" : "Running...",
+            timestamp: Date.now(),
+          });
+        }
+      }
+      if (state.synthesis) {
+        entries.push({ id: "syn-done", type: "complete", content: "Synthesis report assembled", timestamp: Date.now() });
+      }
+      break;
+    }
+
+    default: {
+      // Sector agents
+      const sa = state.sectorAgents[agentId];
+      if (!sa) break;
+      for (const step of sa.thinkingSteps) {
+        entries.push({
+          id: `${agentId}-ts-${step.id}`,
+          type: step.stepType === "phase_start" ? "phase"
+            : step.stepType === "tool_call" ? "tool"
+            : step.stepType === "tool_result" ? "result"
+            : step.stepType === "phase_complete" ? "complete"
+            : "reasoning",
+          content: step.content,
+          detail: step.tool,
+          timestamp: step.timestamp,
+        });
+      }
+      // If no thinking steps but has tool calls, show those
+      if (sa.thinkingSteps.length === 0 && sa.toolCalls.length > 0) {
+        for (let i = 0; i < sa.toolCalls.length; i++) {
+          const tc = sa.toolCalls[i];
+          entries.push({
+            id: `${agentId}-tc-${i}`,
+            type: "tool",
+            content: tc.tool,
+            detail: tc.query,
+            timestamp: Date.now(),
+          });
+        }
+      }
+      if (sa.status === "complete" && sa.thinkingSteps.length === 0) {
+        entries.push({ id: `${agentId}-done`, type: "complete", content: `${agentId} analysis complete`, timestamp: Date.now() });
+      }
+      break;
+    }
+  }
+
+  return entries;
+}
+
+// ─── Timeline Rail ────────────────────────────────────────────────────────
+
+function TimelineNode({
+  id,
+  status,
+  focused,
+  onClick,
+  isLast,
+  thinkingCount,
+}: {
+  id: AgentId;
+  status: "pending" | "running" | "complete";
+  focused: boolean;
+  onClick: () => void;
+  isLast: boolean;
+  thinkingCount: number;
+}) {
+  const meta = AGENT_META[id];
+  const colorMap: Record<string, { dot: string; ring: string; text: string; bg: string }> = {
+    sky:     { dot: "bg-sky-400",     ring: "ring-sky-400/40",     text: "text-sky-300",     bg: "bg-sky-500/10" },
+    blue:    { dot: "bg-blue-400",    ring: "ring-blue-400/40",    text: "text-blue-300",    bg: "bg-blue-500/10" },
+    amber:   { dot: "bg-amber-400",   ring: "ring-amber-400/40",   text: "text-amber-300",   bg: "bg-amber-500/10" },
+    emerald: { dot: "bg-emerald-400", ring: "ring-emerald-400/40", text: "text-emerald-300", bg: "bg-emerald-500/10" },
+    purple:  { dot: "bg-purple-400",  ring: "ring-purple-400/40",  text: "text-purple-300",  bg: "bg-purple-500/10" },
+    pink:    { dot: "bg-pink-400",    ring: "ring-pink-400/40",    text: "text-pink-300",    bg: "bg-pink-500/10" },
+    orange:  { dot: "bg-orange-400",  ring: "ring-orange-400/40",  text: "text-orange-300",  bg: "bg-orange-500/10" },
+    rose:    { dot: "bg-rose-400",    ring: "ring-rose-400/40",    text: "text-rose-300",    bg: "bg-rose-500/10" },
+  };
+  const c = colorMap[meta.color] ?? colorMap.blue;
 
   return (
-    <div ref={scrollRef} className="mt-2 max-h-[180px] overflow-y-auto rounded-lg bg-black/30 px-2.5 py-2 no-scrollbar">
-      {steps.map((step) => (
-        <div
-          key={step.id}
-          className={cn(
-            "flex gap-1.5 py-[2px] text-[11px] leading-relaxed enter-fade",
-            step.stepType === "phase_start" && "mt-1 first:mt-0",
-          )}
-        >
-          <span className="mt-px flex-shrink-0 w-3 text-center"><ThinkingIcon type={step.stepType} /></span>
-          <span
-            className={cn(
-              "flex-1 break-words",
-              step.stepType === "phase_start" ? "text-purple-300/90 font-medium" :
-              step.stepType === "phase_complete" ? "text-green-300/80" :
-              step.stepType === "tool_call" ? "text-sky-300/80" :
-              step.stepType === "tool_result" ? "text-white/40" :
-              step.stepType === "reasoning_chunk" ? "text-white/50 italic" :
-              "text-white/55",
-            )}
-            style={{ fontFamily: step.stepType === "tool_call" || step.stepType === "tool_result" ? "var(--font-mono), monospace" : undefined }}
-          >
-            {step.content}
-          </span>
-        </div>
-      ))}
-      {isRunning && (
-        <div className="flex gap-1.5 py-[2px] text-[11px]">
-          <span className="mt-px flex-shrink-0 w-3 text-center">
-            <span className="inline-block animate-pulse text-purple-400">●</span>
-          </span>
-          <span className="text-white/30 italic">thinking...</span>
-        </div>
+    <button
+      onClick={onClick}
+      className={cn(
+        "group relative flex items-start gap-3 w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200",
+        focused ? `${c.bg} border border-white/10` : "hover:bg-white/[0.03]",
       )}
-    </div>
+    >
+      {/* Timeline line */}
+      {!isLast && (
+        <div className="absolute left-[22px] top-[38px] bottom-[-10px] w-px bg-white/10" />
+      )}
+
+      {/* Dot */}
+      <div className={cn(
+        "relative flex-shrink-0 mt-0.5 h-5 w-5 rounded-full grid place-items-center text-[9px] font-bold transition-all",
+        status === "complete" ? `${c.dot} text-black` : "",
+        status === "running" ? `${c.dot} text-black animate-pulse ring-2 ${c.ring}` : "",
+        status === "pending" ? "bg-white/10 text-white/30" : "",
+      )}>
+        {status === "complete" ? "✓" : meta.icon}
+      </div>
+
+      {/* Label + summary */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "text-[12px] font-medium leading-tight",
+            focused ? c.text : status === "pending" ? "text-white/35" : "text-white/75",
+          )}>
+            {meta.label}
+          </span>
+          {status === "running" && thinkingCount > 0 && (
+            <span className={cn("text-[9px] tabular-nums", c.text)}>{thinkingCount}</span>
+          )}
+        </div>
+        <div className={cn(
+          "text-[10px] leading-snug mt-0.5",
+          status === "pending" ? "text-white/20" : "text-white/40",
+        )}>
+          {status === "complete" ? "Done" : status === "running" ? "Active" : "Waiting"}
+        </div>
+      </div>
+    </button>
   );
 }
 
-function SectorCard({
-  name,
-  status,
-  detail,
-  toolCallsCount,
-  index,
-  agentMode,
-  currentPhase,
-  phaseLabel,
-  thinkingSteps,
+/** Compact Lightning payment badge — sits between Analyst and Sector agents in the rail */
+function LightningBadge({
+  state,
+  focused,
+  onClick,
 }: {
-  name: string;
-  status: "pending" | "running" | "complete";
-  detail: string;
-  toolCallsCount: number;
-  index: number;
-  agentMode: "agentic" | "single_shot" | null;
-  currentPhase: string | null;
-  phaseLabel: string | null;
-  thinkingSteps: ThinkingStep[];
+  state: PipelineState;
+  focused: boolean;
+  onClick: () => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const isAgentic = agentMode === "agentic";
-  const processes = getProcesses(name, agentMode);
-  const totalSteps = processes.length;
+  const payments = state.lightningPayments;
+  const paid = payments.filter(p => p.status === "paid");
+  const paying = payments.some(p => p.status === "paying");
+  const totalSats = paid.reduce((s, p) => s + p.invoice_amount_sats, 0);
+  const lnStatus = getAgentStatus("lightning", state);
 
-  const activeStep =
-    status === "pending"
-      ? -1
-      : status === "complete"
-        ? totalSteps - 1
-        : isAgentic && currentPhase
-          ? Math.min(parseInt(currentPhase, 10) - 1, totalSteps - 1)
-          : Math.min(toolCallsCount, totalSteps - 1);
-
-  const progressPercent =
-    status === "pending"
-      ? 5
-      : status === "complete"
-        ? 100
-        : isAgentic && currentPhase
-          ? Math.min(95, (parseInt(currentPhase, 10) / totalSteps) * 100)
-          : Math.min(90, 26 + activeStep * 18 + Math.min(18, toolCallsCount * 4));
-
-  const runningLabel = isAgentic && phaseLabel
-    ? phaseLabel
-    : processes[Math.max(0, activeStep)];
-
-  const hasThinking = thinkingSteps.length > 0;
+  if (lnStatus === "pending" && payments.length === 0) return null;
 
   return (
-    <div
+    <button
+      onClick={onClick}
       className={cn(
-        "rounded-xl border glass-card enter-card transition-all duration-300",
-        status === "pending" && "border-white/10 p-3",
-        status === "complete" && isAgentic && "border-purple-500/30 p-3",
-        status === "complete" && !isAgentic && "border-green-500/30 p-3",
-        status === "running" && isAgentic && "border-purple-500/40 bg-purple-950/10 p-3",
-        status === "running" && !isAgentic && "border-amber-500/30 bg-amber-950/10 p-3",
+        "relative w-full flex items-center gap-2 px-3 py-2 my-1 rounded-md transition-all text-left",
+        focused
+          ? "bg-amber-500/10 border border-amber-400/20"
+          : "hover:bg-white/[0.03]",
       )}
-      style={{ animationDelay: `${index * 50}ms` }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="text-sm text-white/85">{name}</div>
-          <AgentModeBadge mode={agentMode} />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-white/45">
-            {status === "running" && isAgentic && currentPhase
-              ? `phase ${currentPhase}/${totalSteps}`
-              : status}
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+        <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill={paying ? "#F59E0B" : paid.length > 0 ? "#F59E0B" : "#6B7280"} />
+      </svg>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className={cn("text-[11px] font-medium", paying ? "text-amber-300" : paid.length > 0 ? "text-amber-300/70" : "text-white/40")}>
+            L402 Payments
           </span>
-          {hasThinking && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
-            >
-              {expanded ? "▾" : "▸"}
-            </button>
-          )}
+          {paying && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />}
         </div>
-      </div>
-
-      {/* Phase step indicators */}
-      {isAgentic && status !== "pending" && (
-        <div className="mt-2 flex gap-1">
-          {processes.map((step, i) => (
-            <div
-              key={step}
-              className={cn(
-                "group relative flex-1 h-1.5 rounded-full transition-colors duration-300",
-                i <= activeStep
-                  ? status === "complete" ? "bg-purple-400/80" : "bg-purple-400/60"
-                  : "bg-white/10",
-                i === activeStep && status === "running" && "animate-pulse",
-              )}
-            >
-              <div className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-0.5 text-[9px] text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                {step}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Current status label */}
-      <div className={cn("text-[11px] text-white/60", isAgentic && status !== "pending" ? "mt-1.5" : "mt-2")}>
-        {status === "running" ? (
-          <span className={isAgentic ? "text-purple-300" : "text-amber-300"}>
-            {isAgentic && currentPhase ? `Phase ${currentPhase}: ` : "Processing: "}
-            {runningLabel}
-          </span>
-        ) : status === "complete" ? (
-          <span className={isAgentic ? "text-purple-300" : "text-green-300"}>
-            {isAgentic
-              ? `All ${totalSteps} phases complete · ${thinkingSteps.filter(s => s.stepType === "tool_call").length} tool calls`
-              : `Completed: ${processes[totalSteps - 1]}`}
-          </span>
-        ) : (
-          <span className="text-white/45">Waiting to start</span>
+        {payments.length > 0 && (
+          <div className="text-[9px] text-amber-300/40 tabular-nums">
+            {paid.length}/{payments.length} paid · {totalSats} sats
+          </div>
         )}
       </div>
-
-      {/* Thinking feed — the core UI for agentic agents */}
-      {isAgentic && expanded && hasThinking && (
-        <ThinkingFeed steps={thinkingSteps} isRunning={status === "running"} />
-      )}
-
-      {/* Single-shot agents get the smooth progress bar */}
-      {!isAgentic && (
-        <div className={cn("mt-2 h-[4px] w-full rounded bg-white/10 overflow-hidden progress-track", status === "running" && "progress-running")}>
-          <div
-            className={cn(
-              "h-full rounded transition-[width] duration-500",
-              status === "complete" ? "bg-green-400/80" : status === "running" ? "bg-amber-400/80" : "bg-white/20",
-            )}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-      )}
-    </div>
+    </button>
   );
 }
 
-function LightningLog({ payments }: { payments: LightningPaymentEvent["data"][] }) {
-  const totalSats = payments
-    .filter((p) => p.status === "paid")
-    .reduce((sum, p) => sum + p.invoice_amount_sats, 0);
-
-  const paidCount = payments.filter((p) => p.status === "paid").length;
-  const isPaying = payments.some((p) => p.status === "paying");
-
-  return (
-    <div className="my-3 rounded-xl border border-amber-500/20 bg-amber-950/15 enter-card">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
-          <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill="#F59E0B" />
-        </svg>
-        <span className="text-xs font-medium text-amber-200/90">Lightning L402 Payments</span>
-        <span className="ml-auto flex items-center gap-2 text-[10px] text-amber-300/70">
-          {isPaying && (
-            <span className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-              paying
-            </span>
-          )}
-          {paidCount > 0 && <span>{paidCount} paid · {totalSats} sats</span>}
-        </span>
-      </div>
-
-      {/* Payment entries */}
-      <div className="border-t border-amber-500/10 px-3 py-1.5">
-        {payments.map((payment, i) => (
-          <div
-            key={`${payment.payment_hash}-${i}`}
-            className={cn(
-              "flex items-center gap-2 py-1.5 text-[11px]",
-              i > 0 && "border-t border-amber-500/5",
-            )}
-          >
-            <span className={cn(
-              "h-1.5 w-1.5 rounded-full flex-shrink-0",
-              payment.status === "paid" && "bg-amber-400",
-              payment.status === "paying" && "bg-amber-400 animate-pulse",
-              payment.status === "failed" && "bg-red-400",
-            )} />
-            <span className="flex-1 text-amber-200/70 truncate" style={{ fontFamily: "var(--font-mono), monospace" }}>
-              {payment.service}
-            </span>
-            <span className="text-amber-300/60">{payment.invoice_amount_sats} sats</span>
-            {payment.duration_ms > 0 && (
-              <span className="text-amber-200/40">{Math.round(payment.duration_ms)}ms</span>
-            )}
-            <span
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[9px] font-medium",
-                payment.status === "paid" && "bg-amber-500/20 text-amber-300",
-                payment.status === "paying" && "bg-amber-500/10 text-amber-400 animate-pulse",
-                payment.status === "failed" && "bg-red-500/20 text-red-300",
-              )}
-            >
-              {payment.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
+function TimelineRail({
+  state,
+  focusedAgent,
+  onSelect,
+}: {
+  state: PipelineState;
+  focusedAgent: AgentId;
+  onSelect: (id: AgentId) => void;
+}) {
   const elapsed = formatDuration(state.elapsedMs);
 
-  const classifierSummary = state.classifier
-    ? `task_type: ${state.classifier.task_type} · scope: ${state.classifier.policy_params.scope ?? "unknown"}`
-    : "waiting for classifier...";
+  return (
+    <div className="flex flex-col h-full w-[200px] flex-shrink-0 border-r border-white/8">
+      {/* Header */}
+      <div className="px-3 py-3 border-b border-white/8">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-medium text-white/40 tracking-widest uppercase">Pipeline</span>
+          <div className="flex items-center gap-1.5">
+            {state.status === "running" && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />}
+            <span className="text-[11px] text-white/45 tabular-nums">{elapsed}</span>
+          </div>
+        </div>
+      </div>
 
-  const analystRunning = !state.analystComplete && state.status === "running" && !!state.classifier;
+      {/* Agent nodes + Lightning badge */}
+      <div className="flex-1 overflow-y-auto py-1 no-scrollbar">
+        {RAIL_AGENTS.map((id, i) => {
+          const status = getAgentStatus(id, state);
+          // Cheap event count
+          let count = 0;
+          if (id === "analyst") count = state.analystThinkingSteps.length || (state.analystToolCalls.length + (state.analystComplete ? 1 : 0));
+          else if (id === "classifier") count = state.classifierThinkingSteps.length + (state.classifier ? 1 : 0);
+          else if (id === "synthesis") count = state.synthesisThinkingSteps.length || (state.synthesisPhase?.phase ?? 0);
+          else {
+            const sa = state.sectorAgents[id];
+            count = sa ? (sa.thinkingSteps.length || sa.toolCalls.length) : 0;
+          }
 
-  const sectorAgents = Object.entries(state.sectorAgents);
-  const allSectorsComplete = sectorAgents.length > 0 && sectorAgents.every(([, data]) => data.status === "complete");
-  const anySectorRunning = sectorAgents.some(([, data]) => data.status === "running");
+          return (
+            <div key={id}>
+              <TimelineNode
+                id={id}
+                status={status}
+                focused={focusedAgent === id}
+                onClick={() => onSelect(id)}
+                isLast={i === RAIL_AGENTS.length - 1}
+                thinkingCount={count}
+              />
+              {/* Insert Lightning badge after Analyst */}
+              {id === "analyst" && (
+                <LightningBadge
+                  state={state}
+                  focused={focusedAgent === "lightning"}
+                  onClick={() => onSelect("lightning")}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
 
-  const stage0Status: "pending" | "running" | "complete" = state.classifier
-    ? "complete"
-    : state.status === "running"
-      ? "running"
-      : "pending";
+      {/* View report button */}
+      {state.synthesis && (
+        <div className="p-3 border-t border-white/8">
+          <button
+            onClick={() => {/* handled by parent */}}
+            className="w-full rounded-lg bg-amber-500/90 px-3 py-2 text-xs font-medium text-black transition hover:brightness-95"
+          >
+            View Report
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const stage1Status: "pending" | "running" | "complete" = state.analystComplete
-    ? "complete"
-    : state.status === "running" && !!state.classifier
-      ? "running"
-      : "pending";
+// ─── Spotlight Stream ─────────────────────────────────────────────────────
 
-  const stage2Status: "pending" | "running" | "complete" = allSectorsComplete
-    ? "complete"
-    : anySectorRunning
-      ? "running"
-      : "pending";
+function StreamIcon({ type }: { type: StreamEntry["type"] }) {
+  switch (type) {
+    case "phase":    return <span className="text-purple-400 text-sm">▸</span>;
+    case "tool":     return <span className="text-sky-400 text-sm">⚙</span>;
+    case "result":   return <span className="text-green-400/70 text-sm">↳</span>;
+    case "reasoning": return <span className="text-amber-400 text-sm animate-pulse">●</span>;
+    case "payment":  return <span className="text-amber-400 text-sm">⚡</span>;
+    case "complete": return <span className="text-green-400 text-sm">✔</span>;
+    case "info":     return <span className="text-white/40 text-sm">›</span>;
+    default:         return <span className="text-white/30 text-sm">·</span>;
+  }
+}
 
-  const stage3Status: "pending" | "running" | "complete" = state.synthesis
-    ? "complete"
-    : state.status === "running" && allSectorsComplete
-      ? "running"
-      : "pending";
+/** Human-readable descriptions for known tools */
+const TOOL_INFO: Record<string, { label: string; source: string; color: string }> = {
+  fred_search:            { label: "Search economic data series",       source: "FRED",             color: "sky" },
+  fred_get_series:        { label: "Pull time-series data",            source: "FRED",             color: "sky" },
+  bls_get_data:           { label: "Employment & wage data",           source: "BLS",              color: "sky" },
+  census_query:           { label: "Demographic / housing data",       source: "Census Bureau",    color: "sky" },
+  census_housing_query:   { label: "Housing burden data",              source: "Census Bureau",    color: "sky" },
+  bea_get_data:           { label: "Economic accounts data",           source: "BEA",              color: "sky" },
+  search_academic_papers: { label: "Academic paper search",            source: "Semantic Scholar",  color: "violet" },
+  search_openalex:        { label: "Broad academic search",            source: "OpenAlex",         color: "violet" },
+  search_cbo_reports:     { label: "Congressional budget analysis",    source: "CBO",              color: "violet" },
+  fetch_document_text:    { label: "Fetching full document text",      source: "Web",              color: "blue" },
+  web_search_news:        { label: "News & current context",          source: "Tavily",           color: "blue" },
+  calculate_elasticity:   { label: "Computing price elasticity",       source: "Compute",          color: "emerald" },
+  run_scenario_analysis:  { label: "Running scenario projections",     source: "Compute",          color: "emerald" },
+  market_competition_scan:{ label: "Market competition analysis",      source: "Compute",          color: "emerald" },
+  sec_10k_scan:           { label: "SEC 10-K filing analysis",         source: "SEC",              color: "orange" },
+  llm_chat:               { label: "LLM reasoning",                   source: "LLM",              color: "amber" },
+  llm_classify:           { label: "LLM classification",              source: "LLM",              color: "amber" },
+  google_adk:             { label: "Policy classification",            source: "Google ADK",       color: "amber" },
+  keyword_match:          { label: "Keyword scenario matching",        source: "Local",            color: "white" },
+};
+
+const SOURCE_COLORS: Record<string, { badge: string; border: string; bg: string }> = {
+  sky:     { badge: "bg-sky-500/20 text-sky-300 border-sky-500/30",         border: "border-sky-500/25",    bg: "bg-sky-500/[0.05]" },
+  violet:  { badge: "bg-violet-500/20 text-violet-300 border-violet-500/30", border: "border-violet-500/25", bg: "bg-violet-500/[0.05]" },
+  blue:    { badge: "bg-blue-500/20 text-blue-300 border-blue-500/30",       border: "border-blue-500/25",   bg: "bg-blue-500/[0.05]" },
+  emerald: { badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30", border: "border-emerald-500/25", bg: "bg-emerald-500/[0.05]" },
+  orange:  { badge: "bg-orange-500/20 text-orange-300 border-orange-500/30", border: "border-orange-500/25", bg: "bg-orange-500/[0.05]" },
+  amber:   { badge: "bg-amber-500/20 text-amber-300 border-amber-500/30",   border: "border-amber-500/25",  bg: "bg-amber-500/[0.05]" },
+  white:   { badge: "bg-white/10 text-white/60 border-white/20",            border: "border-white/10",      bg: "bg-white/[0.02]" },
+};
+
+/** Parse tool args from content string */
+function parseToolCall(content: string): { name: string; args: Record<string, string> | string | null } {
+  // Handle "Calling tool_name(k=v, k=v)" format
+  const callingMatch = content.match(/^Calling\s+(\w+)\((.+)\)$/);
+  if (callingMatch) {
+    const pairs: Record<string, string> = {};
+    callingMatch[2].split(/,\s*/).forEach(pair => {
+      const eq = pair.indexOf("=");
+      if (eq > 0) pairs[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      else pairs[pair.trim()] = "";
+    });
+    return { name: callingMatch[1], args: Object.keys(pairs).length > 0 ? pairs : null };
+  }
+  // Handle "tool_name({json})" or "tool_name(args)" format
+  const parenIdx = content.indexOf("(");
+  if (parenIdx > 0) {
+    const name = content.slice(0, parenIdx).trim();
+    const rawArgs = content.slice(parenIdx + 1, -1).trim();
+    // Try JSON parse
+    try {
+      const parsed = JSON.parse(rawArgs);
+      if (typeof parsed === "object" && parsed !== null) {
+        const pairs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          pairs[k] = typeof v === "string" ? v : JSON.stringify(v);
+        }
+        return { name, args: pairs };
+      }
+    } catch { /* not JSON */ }
+    // Try key=value format
+    if (rawArgs.includes("=")) {
+      const pairs: Record<string, string> = {};
+      rawArgs.split(/,\s*/).forEach(pair => {
+        const eq = pair.indexOf("=");
+        if (eq > 0) pairs[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      });
+      return { name, args: Object.keys(pairs).length > 0 ? pairs : rawArgs };
+    }
+    return { name, args: rawArgs || null };
+  }
+  return { name: content, args: null };
+}
+
+/** Tool call card — visually distinct with source badge + structured args */
+function ToolCallCard({ entry, isLatest }: { entry: StreamEntry; isLatest: boolean }) {
+  const parsed = parseToolCall(entry.content);
+  const toolKey = entry.detail || parsed.name;
+  const info = TOOL_INFO[toolKey];
+  const sc = SOURCE_COLORS[info?.color ?? "white"] ?? SOURCE_COLORS.white;
 
   return (
-    <section className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 sm:py-6">
-      <header className="sticky top-[56px] z-20 mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-[var(--bg-surface)]/95 px-4 py-3 backdrop-blur">
-        <h1 className="text-sm tracking-tight text-white/90 truncate">{state.query || "Policy run"}</h1>
-        <span className="hidden rounded-full border border-[var(--fun-cyan)]/40 bg-[var(--fun-cyan)]/10 px-2 py-0.5 text-[10px] text-[var(--fun-cyan)] sm:inline">Workflow Replay</span>
-        <span className="ml-auto inline-flex items-center gap-2 text-xs text-white/55">
-          <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-          live
+    <div className={cn(
+      "mx-4 my-1.5 rounded-lg border transition-all duration-300 spotlight-entry overflow-hidden",
+      isLatest ? `${sc.border} ${sc.bg} shadow-sm` : "border-white/[0.06] bg-white/[0.02]",
+    )}>
+      {/* Header row: source badge + tool name + pulse */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="text-sky-400/70 text-[11px]">⚙</span>
+        {info && (
+          <span className={cn("text-[9px] font-semibold uppercase tracking-wider rounded px-1.5 py-0.5 border", sc.badge)}>
+            {info.source}
+          </span>
+        )}
+        <span className="text-[12px] font-semibold text-white/80" style={{ fontFamily: "var(--font-mono), monospace" }}>
+          {toolKey}
         </span>
-        <span className="text-xs text-white/45">{elapsed}</span>
-      </header>
+        {isLatest && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />}
+      </div>
 
-      <div className="rounded-2xl border border-white/10 bg-[var(--bg-surface)]/80 p-4 shadow-[0_12px_36px_rgba(0,0,0,0.32)]">
-        <StageLabel status={stage0Status}>Stage 0 - Classifier</StageLabel>
-        <AgentRow
-          name="Classifier"
-          status={state.classifier ? "complete" : state.status === "running" ? "running" : "pending"}
-          description={classifierSummary}
-        />
+      {/* Human-readable description */}
+      {info && (
+        <div className="px-3 -mt-1 pb-1">
+          <span className="text-[11px] text-white/35">{info.label}</span>
+        </div>
+      )}
 
-        <StageLabel status={stage1Status}>Stage 1 - Analyst</StageLabel>
-        <div className="flex gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card">
-          <Avatar letter="A" status={state.analystComplete ? "complete" : analystRunning ? "running" : "pending"} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-medium">Analyst agent</div>
-              <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">
-                {state.analystComplete ? "complete" : analystRunning ? "running" : "pending"}
-              </span>
-              {analystRunning && state.analystToolCalls.length > 0 && (
-                <span className="text-[10px] text-white/30 tabular-nums ml-auto">{state.analystToolCalls.length} events</span>
-              )}
+      {/* Structured arguments */}
+      {parsed.args && (
+        <div className="px-3 pb-2.5 pt-0.5">
+          {typeof parsed.args === "object" ? (
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {Object.entries(parsed.args).map(([k, v]) => (
+                <div key={k} className="flex items-baseline gap-1 text-[11px]" style={{ fontFamily: "var(--font-mono), monospace" }}>
+                  <span className="text-white/25">{k}:</span>
+                  <span className="text-white/50">{truncate(String(v), 60)}</span>
+                </div>
+              ))}
             </div>
-            <div className="text-xs text-white/55">
-              {state.analystComplete
-                ? (() => {
-                    const ac = state.analystComplete as any;
-                    const tools = ac.tool_calls_made || ac.tools_called || state.analystToolCalls.length;
-                    const sources = ac.sources_found || ac.tools_succeeded || state.analystToolCalls.length;
-                    return `${tools} tool calls · ${sources} sources`;
-                  })()
-                : "5-phase agentic analysis: policy spec → baseline → transmission → evidence → briefing"}
+          ) : (
+            <div className="text-[11px] text-white/40 leading-relaxed" style={{ fontFamily: "var(--font-mono), monospace" }}>
+              {truncate(parsed.args, 120)}
             </div>
-            {analystRunning && <AnalystTicker events={state.analystToolCalls} />}
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tool result card — paired with tool call above it */
+function ToolResultCard({ entry }: { entry: StreamEntry }) {
+  // Parse "tool_name → result" format
+  const arrowIdx = entry.content.indexOf(" → ");
+  const resultText = arrowIdx > 0 ? entry.content.slice(arrowIdx + 3) : entry.content;
+  const toolKey = arrowIdx > 0 ? entry.content.slice(0, arrowIdx) : entry.detail;
+  const info = toolKey ? TOOL_INFO[toolKey] : null;
+  const sc = SOURCE_COLORS[info?.color ?? "white"] ?? SOURCE_COLORS.white;
+
+  return (
+    <div className={cn("mx-4 -mt-0.5 mb-1.5 rounded-b-lg border border-t-0 spotlight-entry", "border-white/[0.06] bg-white/[0.015]")}>
+      <div className="flex items-start gap-2 px-3 py-2">
+        <span className="text-green-400/60 text-[11px] mt-0.5">✓</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] text-white/45 leading-relaxed" style={{ fontFamily: "var(--font-mono), monospace" }}>
+            {truncate(resultText, 200)}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        {state.lightningPayments.length > 0 && (
-          <LightningLog payments={state.lightningPayments} />
-        )}
-
-        <StageLabel status={stage2Status}>Stage 2 - Sector agents</StageLabel>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {sectorAgents.map(([agent, data], index) => {
-            const lastTool = data.toolCalls[data.toolCalls.length - 1];
-            const detail = lastTool
-              ? `${lastTool.tool}("${lastTool.query}")`
-              : data.status === "complete"
-                ? "Report synthesized"
-                : data.status === "running"
-                  ? "Running analysis"
-                  : "Pending";
-
-            return (
-              <SectorCard
-                key={agent}
-                name={agent}
-                status={data.status}
-                detail={detail}
-                toolCallsCount={data.toolCalls.length}
-                index={index}
-                agentMode={data.agentMode}
-                currentPhase={data.currentPhase}
-                phaseLabel={data.phaseLabel}
-                thinkingSteps={data.thinkingSteps}
-              />
-            );
-          })}
-        </div>
-
-        <StageLabel status={stage3Status}>Stage 3 - Synthesis</StageLabel>
-        <div className="flex gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card">
-          <Avatar letter="S" status={state.synthesis ? "complete" : state.status === "running" && allSectorsComplete ? "running" : "pending"} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-medium">Synthesis agent</div>
-              <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">
-                {state.synthesis ? "complete" : state.status === "running" && allSectorsComplete ? "running" : "pending"}
-              </span>
-              {state.synthesisPhase && !state.synthesis && (
-                <span className="text-[10px] text-white/30 tabular-nums ml-auto">phase {state.synthesisPhase.phase}/5</span>
-              )}
-            </div>
-            <div className="text-xs text-white/55">
-              {state.synthesis
-                ? "Unified report ready"
-                : state.synthesisPhase
-                  ? state.synthesisPhase.name
-                  : "5-phase synthesis: audit → impact → winners → narrative → payload"}
-            </div>
-            {state.synthesisPhase && !state.synthesis && (
-              <div className="mt-2 flex gap-1">
-                {["Consistency Audit", "Net Household Impact", "Winners & Losers", "Narrative & Timeline", "Analytics Payload"].map((step, i) => (
-                  <div
-                    key={step}
-                    className={cn(
-                      "group relative flex-1 h-1.5 rounded-full transition-colors duration-300",
-                      i + 1 < state.synthesisPhase!.phase
-                        ? "bg-rose-400/80"
-                        : i + 1 === state.synthesisPhase!.phase
-                          ? state.synthesisPhase!.status === "complete" ? "bg-rose-400/80" : "bg-rose-400/60 animate-pulse"
-                          : "bg-white/10",
-                    )}
-                  >
-                    <div className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-0.5 text-[9px] text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                      {step}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+/** Lightning payment card */
+function PaymentCard({ entry, isLatest }: { entry: StreamEntry; isLatest: boolean }) {
+  const isPaying = entry.detail?.startsWith("Paying");
+  const isPaid = entry.detail?.startsWith("Paid");
+  return (
+    <div className={cn(
+      "mx-4 my-1.5 rounded-lg border transition-all duration-300 spotlight-entry overflow-hidden",
+      isPaying
+        ? "border-amber-500/30 bg-amber-500/[0.06]"
+        : isPaid
+          ? "border-green-500/20 bg-green-500/[0.04]"
+          : "border-red-500/20 bg-red-500/[0.04]",
+    )}>
+      <div className="flex items-center gap-2 px-3 py-2">
+        <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+          <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill={isPaying ? "#F59E0B" : isPaid ? "#4ADE80" : "#F87171"} />
+        </svg>
+        <span className={cn(
+          "text-[12px] font-semibold tracking-wide",
+          isPaying ? "text-amber-300" : isPaid ? "text-green-300" : "text-red-300",
+        )} style={{ fontFamily: "var(--font-mono), monospace" }}>
+          {entry.content}
+        </span>
+        {isPaying && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />}
+        {isPaid && <span className="ml-auto text-green-400 text-xs">✔</span>}
+      </div>
+      {entry.detail && (
+        <div className="px-3 pb-2 -mt-0.5">
+          <div className={cn(
+            "text-[11px] leading-relaxed",
+            isPaying ? "text-amber-300/50" : isPaid ? "text-green-300/40" : "text-red-300/50",
+          )} style={{ fontFamily: "var(--font-mono), monospace" }}>
+            {entry.detail}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        {state.synthesis && (
-          <div className="mt-3 flex justify-end">
-            <button
-              onClick={onViewReport}
-              className="rounded-lg border border-amber-400/30 bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-black transition hover:brightness-95"
-            >
-              View report
-            </button>
-          </div>
-        )}
+function SpotlightEntry({ entry, isLatest }: { entry: StreamEntry; isLatest: boolean }) {
+  // Tool calls, results, and payments get card treatment
+  if (entry.type === "tool") return <ToolCallCard entry={entry} isLatest={isLatest} />;
+  if (entry.type === "result") return <ToolResultCard entry={entry} />;
+  if (entry.type === "payment") return <PaymentCard entry={entry} isLatest={isLatest} />;
 
-        {state.error && (
-          <div className="mt-3 rounded-lg border border-red-500/30 bg-red-950/30 p-3 text-xs text-red-200">
-            {titleCase(state.error)}
+  return (
+    <div className={cn(
+      "flex gap-3 py-2 px-4 transition-colors duration-500 spotlight-entry",
+      isLatest && "bg-white/[0.03]",
+      entry.type === "phase" && "mt-3 first:mt-0",
+    )}>
+      <span className="flex-shrink-0 mt-1 w-5 text-center">
+        <StreamIcon type={entry.type} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className={cn(
+          "text-[13px] leading-relaxed",
+          entry.type === "phase" ? "text-purple-300 font-semibold text-[14px]" :
+          entry.type === "reasoning" ? "text-white/70" :
+          entry.type === "complete" ? "text-green-300/90 font-medium" :
+          "text-white/60",
+        )}>
+          {entry.content}
+        </div>
+        {entry.detail && (
+          <div className="text-[12px] mt-0.5 text-white/30" style={{ fontFamily: "var(--font-mono), monospace" }}>
+            {entry.detail}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function EmptySpotlight({ agentId, status }: { agentId: AgentId; status: "pending" | "running" | "complete" }) {
+  const meta = AGENT_META[agentId];
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+      <div className="text-3xl mb-3 opacity-20">{meta.icon}</div>
+      <div className="text-white/30 text-sm font-medium mb-1">{meta.label}</div>
+      <div className="text-white/15 text-xs max-w-xs">
+        {status === "pending"
+          ? `Waiting for upstream agents to complete...`
+          : status === "running"
+            ? "Processing — events will appear here..."
+            : meta.description}
+      </div>
+    </div>
+  );
+}
+
+function SpotlightPanel({
+  agentId,
+  state,
+  onViewReport,
+}: {
+  agentId: AgentId;
+  state: PipelineState;
+  onViewReport: () => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevLengthRef = useRef(0);
+  const meta = AGENT_META[agentId];
+  const status = getAgentStatus(agentId, state);
+  const stream = useMemo(() => buildStream(agentId, state), [agentId, state]);
+
+  // Auto-scroll on new entries
+  useEffect(() => {
+    if (stream.length > prevLengthRef.current && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
+    prevLengthRef.current = stream.length;
+  }, [stream.length]);
+
+  const colorMap: Record<string, string> = {
+    sky: "border-sky-500/30", blue: "border-blue-500/30", amber: "border-amber-500/30",
+    emerald: "border-emerald-500/30", purple: "border-purple-500/30", pink: "border-pink-500/30",
+    orange: "border-orange-500/30", rose: "border-rose-500/30",
+  };
+  const textColorMap: Record<string, string> = {
+    sky: "text-sky-300", blue: "text-blue-300", amber: "text-amber-300",
+    emerald: "text-emerald-300", purple: "text-purple-300", pink: "text-pink-300",
+    orange: "text-orange-300", rose: "text-rose-300",
+  };
+
+  const borderColor = colorMap[meta.color] ?? "border-white/10";
+  const textColor = textColorMap[meta.color] ?? "text-white/70";
+
+  // Sector agent metadata
+  const sectorData = (["Labor", "Housing", "Consumer", "Business"] as const).includes(agentId as any)
+    ? state.sectorAgents[agentId]
+    : null;
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Spotlight header */}
+      <div className={cn("flex-shrink-0 border-b px-5 py-3", borderColor)}>
+        <div className="flex items-center gap-3">
+          <div className={cn("text-lg font-semibold", textColor)}>{meta.label}</div>
+          <span className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium border",
+            status === "complete" ? "border-green-500/30 text-green-400 bg-green-500/10" :
+            status === "running" ? `${borderColor} ${textColor} bg-white/[0.03]` :
+            "border-white/10 text-white/30 bg-white/[0.02]",
+          )}>
+            {status === "running" && <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
+            {status}
+          </span>
+          {sectorData?.agentMode && (
+            <span className={cn(
+              "rounded-full px-2 py-0.5 text-[9px] font-medium border",
+              sectorData.agentMode === "agentic"
+                ? "border-purple-400/30 bg-purple-500/15 text-purple-300"
+                : "border-white/10 bg-white/5 text-white/40",
+            )}>
+              {sectorData.agentMode === "agentic" ? "Multi-phase" : "Single-shot"}
+            </span>
+          )}
+          <span className="ml-auto text-[11px] text-white/30 tabular-nums">
+            {stream.length} events
+          </span>
+        </div>
+        <div className="text-[11px] text-white/35 mt-1">{meta.description}</div>
+
+        {/* Synthesis phase bar */}
+        {agentId === "synthesis" && state.synthesisPhase && (
+          <div className="mt-2 flex gap-1">
+            {SYNTHESIS_PHASES.map((step, i) => (
+              <div
+                key={step}
+                className={cn(
+                  "group relative flex-1 h-2 rounded-full transition-colors duration-300",
+                  i + 1 < state.synthesisPhase!.phase ? "bg-rose-400/80" :
+                  i + 1 === state.synthesisPhase!.phase
+                    ? state.synthesisPhase!.status === "complete" ? "bg-rose-400/80" : "bg-rose-400/50 animate-pulse"
+                    : "bg-white/10",
+                )}
+              >
+                <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/95 px-2 py-0.5 text-[9px] text-white/70 opacity-0 transition-opacity group-hover:opacity-100 z-10">
+                  {step}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sector agent phase bar */}
+        {sectorData?.agentMode === "agentic" && sectorData.currentPhase && (
+          <div className="mt-2 flex gap-1">
+            {Array.from({ length: 5 }, (_, i) => {
+              const phaseNum = parseInt(sectorData.currentPhase ?? "0", 10);
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex-1 h-2 rounded-full transition-colors duration-300",
+                    i + 1 < phaseNum ? "bg-purple-400/80" :
+                    i + 1 === phaseNum
+                      ? sectorData.status === "complete" ? "bg-purple-400/80" : "bg-purple-400/50 animate-pulse"
+                      : "bg-white/10",
+                  )}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Stream area */}
+      {stream.length === 0 ? (
+        <EmptySpotlight agentId={agentId} status={status} />
+      ) : (
+        <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 no-scrollbar">
+          {stream.map((entry, i) => (
+            <SpotlightEntry key={entry.id} entry={entry} isLatest={i === stream.length - 1 && status === "running"} />
+          ))}
+
+          {/* Cursor when agent is running */}
+          {status === "running" && (
+            <div className="flex gap-3 py-2 px-4">
+              <span className="flex-shrink-0 mt-1 w-5 text-center">
+                <span className={cn("inline-block h-2 w-2 rounded-full animate-pulse", `bg-${meta.color}-400`)} />
+              </span>
+              <span className="text-[13px] text-white/25 italic">thinking...</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lightning payment summary bar */}
+      {agentId === "lightning" && state.lightningPayments.length > 0 && (
+        <div className="flex-shrink-0 border-t border-amber-500/20 bg-amber-950/10 px-5 py-2.5">
+          <div className="flex items-center gap-3 text-[11px]">
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="flex-shrink-0">
+              <path d="M9.5 1L3 9h5.5L6.5 15 13 7H7.5L9.5 1z" fill="#F59E0B" />
+            </svg>
+            <span className="text-amber-200/80 font-medium">
+              {state.lightningPayments.filter(p => p.status === "paid").length} paid
+            </span>
+            <span className="text-amber-300/50">
+              {state.lightningPayments.filter(p => p.status === "paid").reduce((s, p) => s + p.invoice_amount_sats, 0)} sats total
+            </span>
+            {state.lightningPayments.some(p => p.status === "paying") && (
+              <span className="flex items-center gap-1 text-amber-400 ml-auto">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                paying...
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* View report CTA */}
+      {state.synthesis && (
+        <div className="flex-shrink-0 border-t border-white/8 px-5 py-3">
+          <button
+            onClick={onViewReport}
+            className="w-full rounded-lg border border-amber-400/30 bg-amber-500/90 px-4 py-2.5 text-sm font-medium text-black transition hover:brightness-95"
+          >
+            View Full Report
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Export ───────────────────────────────────────────────────────────
+
+export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
+  const [pinnedAgent, setPinnedAgent] = useState<AgentId | null>(null);
+  const autoAgent = getActiveAgent(state);
+  const focusedAgent = pinnedAgent ?? autoAgent;
+
+  // Auto-unpin when pipeline moves to a new stage
+  const prevAutoRef = useRef(autoAgent);
+  useEffect(() => {
+    if (autoAgent !== prevAutoRef.current) {
+      // If the user pinned and the pipeline moved on, auto-unpin
+      if (pinnedAgent && getAgentStatus(pinnedAgent, state) === "complete") {
+        setPinnedAgent(null);
+      }
+      prevAutoRef.current = autoAgent;
+    }
+  }, [autoAgent, pinnedAgent, state]);
+
+  const handleSelect = useCallback((id: AgentId) => {
+    setPinnedAgent(id === autoAgent ? null : id);
+  }, [autoAgent]);
+
+  return (
+    <section className="h-[calc(100vh-56px)] flex">
+      <TimelineRail
+        state={state}
+        focusedAgent={focusedAgent}
+        onSelect={handleSelect}
+      />
+      <SpotlightPanel
+        agentId={focusedAgent}
+        state={state}
+        onViewReport={onViewReport}
+      />
     </section>
   );
 }
