@@ -58,7 +58,7 @@ async def llm_chat(
 async def _gemini(
     system: str, user: str, json_mode: bool, temp: float, max_tokens: int, fast: bool
 ) -> str:
-    model = "gemini-2.5-flash" if fast else "gemini-2.5-flash"
+    model = settings.classifier_model_name if fast else settings.llm_model_name
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     payload: dict[str, Any] = {
         "contents": [{"parts": [{"text": user}]}],

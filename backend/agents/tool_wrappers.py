@@ -100,10 +100,11 @@ async def search_academic_papers(
 async def search_openalex(
     query: str, sort_by: str = "relevance_score", limit: int = 5
 ) -> str:
-    """Search OpenAlex for economics and social science academic works. Better
-    coverage for NBER working papers, Fed research, World Bank reports.
-    Provides open_access_url for full text. Default sorts by relevance.
-    Use sort_by='cited_by_count' to find landmark papers instead."""
+    """Search OpenAlex for economics academic works. IMPORTANT: Use quoted phrases
+    for the core policy concept to get relevant results. Example:
+    '"minimum wage" employment elasticity' NOT 'minimum wage employment elasticity'.
+    '"universal basic income" poverty' NOT 'universal basic income poverty'.
+    Better coverage for NBER working papers, Fed research. Provides open_access_url."""
     try:
         result = await _search_openalex(query=query, sort_by=sort_by, limit=limit)
         return result.model_dump_json(indent=2)
@@ -113,9 +114,10 @@ async def search_openalex(
 
 @tool
 async def search_cbo_reports(query: str, limit: int = 5) -> str:
-    """Search the Congressional Budget Office for official policy analysis reports.
-    CBO produces authoritative nonpartisan impact analyses, cost estimates,
-    and employment projections for federal policy."""
+    """Search CBO for official policy analysis reports. Returns FULL report text
+    (not just snippets) via advanced search. CBO produces authoritative nonpartisan
+    impact analyses, cost estimates, and employment projections. No need to
+    fetch_document_text on CBO URLs — this tool returns the content directly."""
     try:
         result = await _search_cbo_reports(query=query, limit=limit)
         return result.model_dump_json(indent=2)
@@ -137,9 +139,11 @@ async def web_search_news(query: str, recency: str = "past_month") -> str:
 
 @tool
 async def fetch_document_text(url: str, max_chars: int = 4000) -> str:
-    """Fetch and extract readable text from a URL (HTML or PDF). Use AFTER a
-    search tool finds a relevant document you need to read in full.
-    Increase max_chars to 8000-10000 for long CBO reports."""
+    """Fetch and extract readable text from a URL (HTML or PDF).
+    Auto-checks Unpaywall for free versions of paywalled academic papers.
+    DO NOT use on cbo.gov URLs (blocked by Cloudflare — use search_cbo_reports instead).
+    DO NOT use on publisher URLs (wiley, oup, springer — use abstracts from search tools).
+    GOOD for: news articles, Wikipedia, open-access repository PDFs, government sites."""
     try:
         result = await _fetch_document_text(url=url, max_chars=max_chars)
         return result.model_dump_json(indent=2)

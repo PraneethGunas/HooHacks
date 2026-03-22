@@ -1,0 +1,416 @@
+# Consumer & Prices Sector Agent — Tool Inventory
+
+## Input (Provided by Orchestrator, Not a Tool)
+
+The agent receives:
+1. **Policy Analyst's Briefing** — policy spec, baseline data,
+   transmission channels, sector exposure matrix
+2. **Labor Agent's Output** (if available) — wage change estimates,
+   employment effects, benefits cliff data
+3. **Housing Agent's Output** (if available) — rent change estimates,
+   housing cost changes by region
+
+These are INPUTS to the Consumer Agent's analysis. The agent uses
+its own tools for price-specific deep research.
+
+---
+
+## Tool 1: bls_get_data
+
+**Purpose in Consumer Context:** THE primary tool. BLS produces the
+Consumer Price Index — the definitive measure of what consumers pay.
+Also produces the Producer Price Index (upstream price pressure) and
+Consumer Expenditure Survey data (how households spend). This tool
+covers three critical data programs for this agent.
+
+**CPI Series (What Consumers Pay) — Consumer Price Index:**
+
+*National CPI by major category:*
+| Series ID | Category | Use For |
+|-----------|----------|---------|
+| CUSR0000SA0 | CPI All Items (SA) | Overall inflation baseline |
+| CUSR0000SAF1 | CPI Food | Food price baseline |
+| CUSR0000SAF11 | CPI Food at home (groceries) | Grocery price impact |
+| CUSR0000SEFV | CPI Food away from home (restaurants) | Restaurant price impact |
+| CUSR0000SAH1 | CPI Shelter | Housing costs (coordinate with Housing Agent) |
+| CUSR0000SEHA | CPI Rent of primary residence | Rent inflation |
+| CUSR0000SAA | CPI Apparel | Clothing price impact |
+| CUSR0000SAT | CPI Transportation | Transport cost impact |
+| CUSR0000SETB01 | CPI Gasoline | Gas price impact |
+| CUSR0000SAM | CPI Medical care | Healthcare cost impact |
+| CUSR0000SAE | CPI Education and communication | Education cost impact |
+| CUSR0000SAR | CPI Recreation | Entertainment cost impact |
+| CUSR0000SEHF | CPI Energy services (utilities) | Utility cost impact |
+| CUSR0000SEEB | CPI Childcare and nursery school | Childcare cost impact |
+
+*Regional CPI (only 4 regions + select metros):*
+| Series ID Pattern | Coverage |
+|-------------------|----------|
+| CUUR0100SA0 | CPI Northeast |
+| CUUR0200SA0 | CPI Midwest |
+| CUUR0300SA0 | CPI South |
+| CUUR0400SA0 | CPI West |
+| CUURS49ASA0 | CPI Washington-Arlington-Alexandria DC-VA-MD-WV |
+
+**PPI Series (Upstream Price Pressure) — Producer Price Index:**
+
+| Series ID | Category | Use For |
+|-----------|----------|---------|
+| WPUFD4 | PPI Finished consumer goods | Wholesale → retail pipeline |
+| WPUFD41 | PPI Finished consumer foods | Food wholesale prices |
+| WPUFD42 | PPI Finished consumer goods (ex food/energy) | Core goods wholesale |
+| WPUFD3 | PPI Finished goods (total) | Overall upstream pressure |
+| WPU01 | PPI Farm products | Agricultural input costs |
+| WPU02 | PPI Processed foods and feeds | Food processing costs |
+| WPU081 | PPI Lumber and wood products | Construction material (for Housing) |
+| WPU1017 | PPI Steel mill products | Tariff-sensitive material |
+
+PPI leads CPI by 1-3 months. A PPI increase that hasn't shown up
+in CPI yet signals incoming consumer price increases.
+
+**Consumer Expenditure Survey Data:**
+BLS publishes CE data as tables (not through the standard API).
+Use `web_search_news` or `fetch_document_text` to access current
+CE tables from bls.gov/cex/ for budget share data by income quintile.
+
+**API:** BLS — `https://api.bls.gov/publicAPI/v2/timeseries/data/`
+**Auth:** BLS registration key (free)
+**Cost:** Free
+
+---
+
+## Tool 2: fred_search
+
+**Purpose in Consumer Context:** Discover price, income, and
+spending-related FRED series.
+
+**Typical Consumer/Price Queries:**
+- "personal consumption expenditures" → PCE
+- "real disposable income" → DSPIC96
+- "consumer confidence" → UMCSENT
+- "retail sales" → RSAFS
+- "food price index" → various
+- "import price index" → for tariff analysis
+- "personal saving rate" → PSAVERT
+
+**API:** FRED — `https://api.stlouisfed.org/fred/series/search`
+**Auth:** FRED API key (free)
+**Cost:** Free
+
+---
+
+## Tool 3: fred_get_series
+
+**Purpose in Consumer Context:** Pull time series data for income,
+spending, prices, and consumer sentiment indicators.
+
+**Critical Consumer Series:**
+
+| Series ID | What It Measures | Use For |
+|-----------|-----------------|---------|
+| DSPIC96 | Real disposable personal income | Income baseline |
+| PCE | Personal consumption expenditures | Total spending baseline |
+| PCEPILFE | Core PCE price index (ex food/energy) | Fed's preferred inflation measure |
+| RSAFS | Retail sales (total) | Consumer spending level |
+| UMCSENT | U. Michigan Consumer Sentiment | Consumer confidence |
+| PSAVERT | Personal saving rate | Financial buffer capacity |
+| MEHOINUSA672N | Median household income (US) | Income baseline |
+| CPIAUCSL | CPI All Urban Consumers | Price level baseline |
+| PCEPI | PCE Price Index | Alternative price measure |
+| IR | Import price index | Tariff pass-through tracking |
+| DGDSRL1A225NBEA | Real personal consumption: goods | Goods spending trend |
+| DSERRL1A225NBEA | Real personal consumption: services | Services spending trend |
+| A229RX0 | Real PCE per capita | Per-person spending power |
+| MEPAINUSA672N | Median personal income | Individual income baseline |
+
+**State-level income:**
+- `MEHOINUSVA672N` — Median household income, Virginia
+
+**API:** FRED — `https://api.stlouisfed.org/fred/series` + `/observations`
+**Auth:** FRED API key (free)
+**Cost:** Free
+
+---
+
+## Tool 4: census_acs_query
+
+**Purpose in Consumer Context:** Household income distribution at
+county/metro level. This is how you know what fraction of households
+in each area fall into each income tier, which is essential for the
+distributional analysis. Also provides poverty rates, SNAP/Medicaid
+enrollment proxies, and household composition data.
+
+**Key ACS Tables for Consumer Analysis:**
+
+| Table | What It Measures |
+|-------|-----------------|
+| B19001 | Household income distribution (brackets) | 
+| B19013 | Median household income |
+| B19025 | Aggregate household income |
+| B19301 | Per capita income |
+| B17001 | Poverty status by age and sex |
+| B22003 | SNAP/food stamp receipt |
+| B11001 | Household type and size |
+| B08301 | Means of transportation to work (for transport cost analysis) |
+| B27010 | Health insurance type (for healthcare cost analysis) |
+| S1901 | Income summary table (has mean, median, and distribution) |
+
+**Why this matters for consumer analysis:**
+You need to know how many households are in each income tier to
+weight your impact scorecards properly. If 40% of households in
+Southwest Virginia earn below $40K, and your analysis shows those
+households lose $45/month in purchasing power, that's a much bigger
+story than if only 10% are in that tier.
+
+**API:** Census — `https://api.census.gov/data/{year}/acs/acs5`
+**Auth:** Census API key (free)
+**Cost:** Free
+
+---
+
+## Tool 5: bea_regional_data
+
+**Purpose in Consumer Context:** Regional Price Parities (RPP) and
+Personal Consumption Expenditure by state. RPPs tell you how much
+more or less expensive each region is compared to the national
+average — critical for translating national price change estimates
+into local dollar impacts.
+
+**Key BEA Tables:**
+
+| Table | What It Measures | Use For |
+|-------|-----------------|---------|
+| SARPP | State Regional Price Parities (overall) | State cost-of-living comparison |
+| MARPP | Metro Regional Price Parities | Metro cost-of-living comparison |
+| SAPCE1 | Personal consumption by state | State spending patterns |
+| CAINC1 | Personal income by county | County income baseline |
+| SAINC7 | Wages and salaries by industry by state | Income composition |
+
+**Regional Price Parities breakdown:**
+- RPP (Goods) — tradeable goods price level
+- RPP (Services: Rents) — housing cost level
+- RPP (Services: Other) — non-housing services cost level
+- RPP (All items) — overall cost of living
+
+**Virginia RPP context (approximate):**
+- Northern Virginia (DC metro): RPP ~115-120 (15-20% above national)
+- Richmond metro: RPP ~95-100 (near national average)
+- Hampton Roads: RPP ~90-95 (slightly below)
+- Rural/Southwest VA: RPP ~80-85 (15-20% below national)
+
+This means a $50/month price increase nationally translates to
+~$57-60 in NoVA and ~$40-42 in rural VA.
+
+**API:** BEA — `https://apps.bea.gov/api/data/`
+**Auth:** BEA API key (free)
+**Cost:** Free
+
+---
+
+## Tool 6: search_openalex
+
+**Purpose in Consumer Context:** Find academic research on price
+pass-through, consumer welfare effects, demand elasticities, and
+distributional incidence of policy-driven price changes.
+
+**Typical Consumer Research Queries:**
+- "minimum wage price pass-through restaurant"
+- "tariff consumer price pass-through"
+- "consumer welfare cost of living policy"
+- "regressive price increase low income"
+- "demand elasticity food necessities"
+- "consumer substitution response price increase"
+- "cost of living index methodology"
+- "Engel curve income expenditure shares"
+- "sales tax incidence consumer price"
+- "import price pass-through retail"
+
+**API:** OpenAlex — `https://api.openalex.org/works`
+**Auth:** None (include email for polite pool)
+**Cost:** Free
+
+---
+
+## Tool 7: search_google_scholar
+
+**Purpose in Consumer Context:** Secondary academic search. Google
+Scholar excels at finding the canonical consumer economics papers
+(Deaton, Atkinson, Hausman, etc.) and highly-cited empirical
+pass-through studies.
+
+**Typical Queries:**
+- "consumer price index bias substitution"
+- "pass-through rate minimum wage prices empirical"
+- "tariff incidence consumer welfare Amiti"
+- "food price elasticity low income households"
+- "cost of living inequality"
+- "expenditure shares income quintile United States"
+
+**API:** SerpAPI — `https://serpapi.com/google-scholar-api`
+**Auth:** SerpAPI key
+**Cost:** Free tier (100/month, shared with other agents)
+
+---
+
+## Tool 8: web_search_news
+
+**Purpose in Consumer Context:** Find recent real-world price data,
+industry reports, and current outcomes from analogous policies.
+Particularly valuable for finding Zillow rent reports, grocery
+chain pricing announcements, restaurant price surveys, and business
+press coverage of pricing decisions.
+
+**Typical Queries:**
+- "restaurant price increase minimum wage 2025 2026"
+- "California fast food prices after $20 minimum wage"
+- "grocery prices trend 2026 Virginia"
+- "consumer spending data recent report"
+- "BLS CPI report latest release"
+- "tariff consumer goods prices increase 2026"
+- "cost of living increase Virginia"
+- "Walmart Target pricing strategy cost pressure"
+- "consumer confidence survey latest"
+
+**Key industry sources this surfaces:**
+- NRF (National Retail Federation) — retail spending data
+- NRA (National Restaurant Association) — restaurant price surveys
+- IRI/Nielsen — grocery price tracking
+- Bankrate / NerdWallet — consumer finance impact analysis
+- BLS CPI news releases — most current monthly data
+
+**API:** Tavily — `https://api.tavily.com/search`
+**Auth:** Tavily API key
+**Cost:** Free tier (shared allocation)
+
+---
+
+## Tool 9: fetch_document_text
+
+**Purpose in Consumer Context:** Read full reports on consumer
+impact. Key sources to fetch:
+
+- BLS CPI detailed reports (methodology, category-level detail)
+- BLS Consumer Expenditure Survey tables (budget shares by income)
+- CBO distributional analyses
+- Academic papers on pass-through rates (from OpenAlex open access URLs)
+- Tax Foundation analyses (tax incidence studies)
+- Brookings/Urban Institute consumer welfare studies
+- USDA Economic Research Service (food price analysis)
+
+**API:** Direct HTTP + BeautifulSoup/pdfplumber
+**Auth:** None
+**Cost:** Free
+
+---
+
+## Tool 10: search_cbo_reports
+
+**Purpose in Consumer Context:** CBO frequently produces
+distributional analyses showing how policies affect household
+budgets by income quintile. Their methodology is the gold standard
+for federal policy consumer impact assessment.
+
+**Typical Queries:**
+- "distributional effects minimum wage CBO"
+- "consumer price effects tariffs CBO"
+- "household income distribution policy CBO"
+- "cost of living changes CBO"
+- "effective tax rate by income quintile CBO"
+
+**API:** Tavily (scoped to cbo.gov)
+**Auth:** Tavily API key (shared)
+**Cost:** Free tier (shared allocation)
+
+---
+
+## Tool 11: usda_food_prices
+
+**Purpose in Consumer Context:** USDA Economic Research Service
+tracks food prices with more granularity than BLS CPI. Provides
+food price outlook, farm-to-retail price spreads, and food
+expenditure data broken down by income level and food category.
+
+**Key USDA ERS Datasets:**
+- Food Price Outlook — monthly and annual food price forecasts
+- Food Expenditure Series — food spending by source and food category
+- Quarterly Food-at-Home Price Database — item-level grocery prices
+- Food Access Research Atlas — food desert mapping
+
+**Access method:** USDA ERS does not have a real-time REST API.
+Data is published as downloadable datasets and reports at
+`ers.usda.gov/data-products/`. Use `web_search_news` to find
+the most current USDA food price outlook report, then
+`fetch_document_text` to read it.
+
+**Workaround implementation:**
+```python
+# Search for latest USDA food price data
+web_search_news("USDA ERS food price outlook 2026", recency="past_month")
+
+# Then fetch the found report
+fetch_document_text("https://ers.usda.gov/data-products/food-price-outlook/")
+```
+
+**Cost:** Free (public data)
+
+---
+
+## Tool 12: import_price_data (for tariff policies)
+
+**Purpose in Consumer Context:** When analyzing tariffs or trade
+policies, you need import price indices to trace the tariff →
+import price → wholesale price → consumer price pipeline.
+
+**Implementation:** This is a specialized BLS query, not a separate
+API. Use `bls_get_data` with import/export price series:
+
+| Series ID | What It Measures |
+|-----------|-----------------|
+| EIUIR | Import Price Index (all commodities) |
+| EIUIR100 | Import Price Index (ex petroleum) |
+| EIUIQ | Import Price Index by end use (capital goods) |
+| EIUIR221 | Import Price Index (food, feeds, beverages) |
+| EIUIR3 | Import Price Index (industrial supplies) |
+| EIUIR4 | Import Price Index (capital goods) |
+| EIUIR5 | Import Price Index (automotive) |
+| EIUIR6 | Import Price Index (consumer goods) |
+
+**API:** Same BLS API
+**Auth:** Same BLS key
+**Cost:** Free
+
+---
+
+## Summary Table
+
+| # | Tool | Primary API | Auth | Cost | Consumer-Specific Use |
+|---|------|------------|------|------|----------------------|
+| 1 | bls_get_data | BLS | BLS key | Free | CPI by category, PPI, import prices, CE data |
+| 2 | fred_search | FRED | FRED key | Free | Discover income/spending/price series |
+| 3 | fred_get_series | FRED | FRED key | Free | Income, PCE, savings, consumer sentiment, inflation |
+| 4 | census_acs_query | Census | Census key | Free | Income distribution, poverty, SNAP, household composition |
+| 5 | bea_regional_data | BEA | BEA key | Free | Regional price parities, state consumption, county income |
+| 6 | search_openalex | OpenAlex | None | Free | Pass-through research, elasticity studies, welfare analysis |
+| 7 | search_google_scholar | SerpAPI | SerpAPI key | Free tier | Canonical consumer economics papers |
+| 8 | web_search_news | Tavily | Tavily key | Free tier | Current price data, industry reports, analogous outcomes |
+| 9 | fetch_document_text | HTTP | None | Free | Full CBO/BLS/USDA reports, academic papers |
+| 10 | search_cbo_reports | Tavily | Tavily key | Free tier | CBO distributional analyses |
+| 11 | usda_food_prices | USDA ERS (via web) | None | Free | Food price outlook, expenditure data |
+| 12 | import_price_data | BLS (same API) | BLS key | Free | Import price indices for tariff analysis |
+
+**API Keys Required (incremental beyond Policy Analyst):**
+None — all keys reuse those already obtained for the Policy Analyst
+and Housing Agent (FRED, BLS, Census, BEA, Tavily, SerpAPI).
+
+---
+
+## Tools NOT Included (Rationale)
+
+| Tool Considered | Why Excluded |
+|----------------|--------------|
+| Nielsen/IRI grocery scanner data | Paid commercial product, $$$$ |
+| Credit card transaction data (Visa/Mastercard aggregates) | Not publicly available as API |
+| GasBuddy API | Niche (gas prices only), web_search_news covers this |
+| Numbeo cost of living API | User-submitted data, unreliable for policy analysis |
+| MIT Billion Prices Project | Discontinued/absorbed into academic work |
+| Yelp Fusion API (restaurant prices) | No historical price data, not useful for policy analysis |

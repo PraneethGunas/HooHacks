@@ -107,7 +107,7 @@ def _build_agent_and_runner():
 
     agent = Agent(
         name="policy_classifier",
-        model=settings.classifier_model_name,  # gemini-2.5-flash (fast + cheap)
+        model=settings.classifier_model_name,  # gemini-3-flash-preview
         instruction=_CLASSIFIER_INSTRUCTION,
     )
 
