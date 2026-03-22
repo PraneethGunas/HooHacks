@@ -1,0 +1,23 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.5,
+      "tool_trajectory_match_type": "IN_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response classifies the policy as TRANSFER",
+        "The response sets income_effect_exists to true",
+        "The response computes the annual fiscal cost (at least $3 trillion)",
+        "The response identifies at least 5 transmission channels including direct income, demand stimulus, inflationary pressure, and labor supply",
+        "The downstream_directives tell sector agents to INCLUDE income-side calculations",
+        "The response flags the funding mechanism as a major uncertainty",
+        "The response includes evidence from UBI pilot studies (Stockton, Finland, or similar)"
+      ]
+    },
+    "hallucinations_v1": {
+      "threshold": 0.7
+    }
+  }
+}

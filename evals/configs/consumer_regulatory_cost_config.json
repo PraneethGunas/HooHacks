@@ -1,0 +1,22 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.4,
+      "tool_trajectory_match_type": "ANY_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.8,
+      "rubrics": [
+        "The response operates in MODE B (pure cost analysis)",
+        "The response sets income change to $0 for all household profiles",
+        "The response does NOT mention wage ripple, wage compression, or wage increase as a benefit",
+        "The response does NOT claim any household is better off or a winner",
+        "The response frames the impact as a pure cost increase borne by consumers",
+        "The response includes pass-through rates specific to material substitution or packaging cost policies",
+        "The response labels the distributional burden as regressive or proportional, NOT progressive",
+        "The scorecard shows only cost changes, not net income gains",
+        "The response does NOT fabricate an income effect that does not exist in the policy"
+      ]
+    }
+  }
+}

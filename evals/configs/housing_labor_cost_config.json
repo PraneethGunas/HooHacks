@@ -1,0 +1,20 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.4,
+      "tool_trajectory_match_type": "ANY_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response activates Pathway B (Household Income/Demand) because income_effect_exists is true",
+        "The response activates Pathway A (Construction Cost) because minimum wage affects construction labor",
+        "The response activates Pathway C (Operating Cost) because minimum wage affects property management",
+        "The response includes rent change estimates with low/central/high ranges",
+        "The response includes at least 2 geographic sub-markets",
+        "The response includes an affordability scorecard with income tiers",
+        "The response uses rent elasticities in the 0.3-0.7 range with citations"
+      ]
+    }
+  }
+}

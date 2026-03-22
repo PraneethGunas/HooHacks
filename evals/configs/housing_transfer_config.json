@@ -1,0 +1,20 @@
+{
+  "criteria": {
+    "tool_trajectory_avg_score": {
+      "threshold": 0.4,
+      "tool_trajectory_match_type": "ANY_ORDER"
+    },
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.7,
+      "rubrics": [
+        "The response activates Pathway B with HIGH relevance due to massive income injection",
+        "The response activates Pathway D due to fiscal cost and inflation risk affecting interest rates",
+        "The response produces a FULL affordability scorecard because impact exceeds materiality threshold",
+        "The response includes at least 3 geographic sub-markets with different vacancy or tightness levels",
+        "The response includes rent change estimates exceeding $50/month in tight markets",
+        "The response includes a temporal sequence across at least 3 time horizons",
+        "The response computes nominal vs real analysis (UBI income vs rent increase)"
+      ]
+    }
+  }
+}
