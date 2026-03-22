@@ -16,7 +16,7 @@ This is NOT a chatbot that summarizes articles. Each agent calls real government
 |--------|--------|-----------|
 | Rudra | Agent Orchestration (LangGraph state machine + ReAct agents) | `backend/agents/` |
 | Praneeth | Backend API (FastAPI + WebSocket) + Pydantic schemas + Lightning/L402 | `backend/`, `backend/lightning/` |
-| Pratham | Infra (Docker Compose) + Performance (async parallel execution) | `docker/`, `backend/` (perf tuning) |
+| Pratham | Infra (Docker Compose) + Performance (async parallel execution) + **Stage 0 ADK Classifier** | `docker/`, `backend/` (perf tuning), `backend/agents/classifier.py` |
 | Samank | Frontend (React + D3.js Sankey) + SSE live streaming UI | `frontend/` |
 
 ---
@@ -29,7 +29,7 @@ This architecture is locked. All 7 agents, 5 stages, data schemas, and pipeline 
 
 | Agent | Purpose | Stage |
 |-------|---------|-------|
-| **Classifier** | Routes user query; extracts policy parameters | 0 — Preprocessing |
+| **Classifier** | Routes user query; extracts policy parameters. **🟢 IMPLEMENTED** — powered by Google ADK (SZNS Solutions sponsor track) | 0 — Preprocessing |
 | **Analyst Agent** | Parses policy, gathers baseline data, finds precedents, produces briefing packet | 1 — Research |
 | **Labor Agent** | Employment, wages, workforce impacts | 2 — Sector Analysis |
 | **Housing Agent** | Housing demand, rents, geographic mobility | 2 — Sector Analysis |
@@ -45,8 +45,9 @@ User Input: "Raise minimum wage to $15/hr"
        │
        ▼
 ┌──────────────┐
-│  CLASSIFIER   │  Cheap/fast model (Gemini Flash / GPT-4o-mini / Haiku)
-│  (Stage 0)    │  → task_type, policy_params
+│  CLASSIFIER   │  Google ADK — gemini-2.5-flash (cheap/fast)
+│  (Stage 0)    │  → ClassifierOutput: task_type, policy_params,
+│  🟢 BUILT     │    confidence, cleaned_query
 └──────┬───────┘
        │
        ▼
@@ -110,6 +111,19 @@ The four sectors create a closed feedback loop:
 
 These are the structured types that flow between agents. Agents reason over each other's structured claims, not raw text.
 
+### Stage 0 Output (Classifier)
+
+```
+ClassifierOutput                         — from backend/agents/schemas.py
+├── task_type: PolicyTaskType enum       — minimum_wage | trade_tariff | immigration
+│                                           tax_policy | housing_regulation | healthcare
+│                                           education | environmental | other
+├── policy_params: dict[str, str]        — {action, value, scope, timeline}
+├── confidence: str                      — high | medium | low
+├── cleaned_query: str                   — normalised input for downstream agents
+└── reasoning: str                       — one-sentence classification explanation
+```
+
 ### Core Epistemic Objects
 
 ```
@@ -164,6 +178,50 @@ SynthesisReport
 | **EMPIRICAL** | Backed by data the agent retrieved | Direct data from FRED/BLS/Census OR peer-reviewed studies with citation |
 | **THEORETICAL** | Follows from economic models, no direct data | Must cite the model/theory and name assumptions |
 | **SPECULATIVE** | Agent's reasoning, flagged as uncertain | Must be explicitly marked. Cannot appear in final report without caveat |
+
+---
+
+## ADK Classifier (Stage 0) — SZNS Solutions Sponsor Track
+
+**🟢 IMPLEMENTED** — `backend/agents/classifier.py`
+
+Uses Google's Agent Development Kit (ADK) with `gemini-2.5-flash` to classify the raw user query and extract structured parameters before the LangGraph pipeline runs. No tool calls — pure reasoning/extraction (~2 seconds).
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/agents/classifier.py` | ADK Agent + Runner + `run_classifier()` async entry point |
+| `backend/agents/schemas.py` | `ClassifierOutput` + `PolicyTaskType` Pydantic models (top of file) |
+
+### How to Wire Into Pipeline
+
+```python
+from backend.agents.classifier import run_classifier
+
+# In POST /api/query handler, before invoking LangGraph:
+classifier_out = await run_classifier(user_query)
+# classifier_out.task_type      → route to relevant sector emphasis
+# classifier_out.cleaned_query  → use as canonical query for AnalystState
+# classifier_out.policy_params  → available upfront for all downstream agents
+```
+
+### Graceful Degradation
+
+If `google-adk` is not installed or the API call fails, `run_classifier()` returns a minimal `ClassifierOutput` with `task_type="other"` and the original query unchanged — the pipeline never hard-crashes on Stage 0.
+
+### Classifier Config
+
+```env
+GEMINI_API_KEY=AIza...                   # Required for ADK
+CLASSIFIER_MODEL_NAME=gemini-2.5-flash   # Override in .env if needed
+```
+
+### Testing
+
+```bash
+python3 test_classifier.py   # smoke test in project root
+```
 
 ---
 
@@ -443,8 +501,8 @@ OPENAI_MODEL=gpt-4o
 OPENAI_CLASSIFIER_MODEL=gpt-4o-mini
 ANTHROPIC_MODEL=claude-opus-4-6
 ANTHROPIC_CLASSIFIER_MODEL=claude-haiku-4-5-20251001
-GOOGLE_MODEL=gemini-2.0-flash
-GOOGLE_CLASSIFIER_MODEL=gemini-2.0-flash
+GOOGLE_MODEL=gemini-2.5-flash
+GOOGLE_CLASSIFIER_MODEL=gemini-2.5-flash
 ```
 
 Only the key for the selected provider needs to be filled in. The backend reads `LLM_PROVIDER` to route all LLM calls — no code changes needed to switch models.
@@ -454,6 +512,7 @@ Only the key for the selected provider needs to be filled in. The backend reads 
 ## Tech Decisions
 
 **Fixed:**
+- **Stage 0 Classifier:** Google ADK (`google-adk`) — SZNS Solutions sponsor track
 - **Agent Orchestration:** LangGraph (state machine + ReAct agents via `create_react_agent`)
 - **Agent Communication:** Pydantic models (CausalClaim, SectorReport, AgentChallenge, etc.)
 - **Sector Agent Execution:** Async parallel (all 4 run simultaneously)
@@ -492,6 +551,7 @@ The backend streams intermediate results so the user sees agents working in real
 | Metric | Target |
 |--------|--------|
 | Total pipeline runtime | 30-60 seconds |
+| Stage 0 (Classifier, ADK) | ~2 seconds |
 | Stage 1 (Analyst) | 10-15 seconds |
 | Stage 2 (Sector Agents, parallel) | 8-12 seconds each |
 | Stage 3 (Debate + Revision) | 8-12 seconds |
