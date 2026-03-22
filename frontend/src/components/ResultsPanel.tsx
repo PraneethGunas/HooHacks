@@ -2,15 +2,22 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { SynthesisReport } from "@/types/pipeline";
+import SankeyDiagram from "@/components/SankeyDiagram";
 
-// ─── Convenience aliases (kept local so Samank's component code reads cleanly)
-// All data comes from SynthesisReport which is the pipeline's canonical type.
-// Every access below uses optional chaining + fallback defaults so the UI
-// never crashes on partial / malformed LLM output.
-// ───────────────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Confidence = "HIGH" | "MEDIUM" | "LOW";
+type Direction = "positive" | "negative";
+
+interface HeadlineMetric {
+  id: string;
+  label: string;
+  value: string;
+  range: { low: string; central: string; high: string } | null;
+  direction: Direction;
+  confidence: Confidence;
+  context: string;
+}
 
 interface WaterfallStep {
   label: string;
@@ -47,62 +54,159 @@ interface TimelinePhase {
   dominant_driver: string;
 }
 
-// ─── Color system ─────────────────────────────────────────────────────────────
-// Red = only for genuinely negative economic outcomes
-// Amber/orange = warnings, uncertainty, medium severity, trade-offs
-// Slate/blue = neutral info, low confidence (not alarming)
-// Emerald = gains, positive outcomes, high confidence
+interface WinnerLoserProfile {
+  profile: string;
+  net_monthly_range: string;
+  pct_of_income_range: string;
+  why: string;
+  confidence: Confidence;
+  impact_quality?: string;
+  caveat?: string;
+  depends_on?: string;
+}
 
-const CONF_STYLES: Record<Confidence, { pill: string; dot: string; label: string }> = {
+interface GeographicRegion {
+  id: string;
+  name: string;
+  examples: string;
+  color: string;
+  rent_impact_severity: "HIGH" | "MEDIUM" | "LOW";
+  price_impact_severity: "HIGH" | "MEDIUM" | "LOW";
+  net_monthly_range_median_hh: string;
+  explanation: string;
+  key_factor: string;
+}
+
+interface SankeyNode {
+  id: string;
+  label: string;
+  category: "policy" | "sector" | "effect" | "outcome";
+}
+
+interface SankeyLink {
+  source: string;
+  target: string;
+  value: number;
+  label?: string;
+}
+
+interface SankeyData {
+  nodes: SankeyNode[];
+  links: SankeyLink[];
+}
+
+interface FullReport {
+  meta: {
+    pipeline_duration_seconds: number;
+    total_tool_calls: number;
+    agents_completed: string[];
+    model_used: string;
+  };
+  policy: {
+    title: string;
+    one_liner: string;
+    geography: string;
+    estimated_annual_cost: string;
+  };
+  headline: {
+    verdict: string;
+    bottom_line: string;
+    confidence: Confidence;
+  };
+  headline_metrics: HeadlineMetric[];
+  waterfall: WaterfallData;
+  category_breakdown: { categories: CategoryItem[] };
+  timeline: { phases: TimelinePhase[]; household_profile: string };
+  winners_losers: {
+    winners: WinnerLoserProfile[];
+    losers: WinnerLoserProfile[];
+    mixed: WinnerLoserProfile[];
+    distributional_verdict: { progressive_or_regressive: string; explanation: string };
+  };
+  geographic_impact: { regions: GeographicRegion[] };
+  sankey_data?: SankeyData | null;
+  confidence_assessment: {
+    weakest_link: string;
+    what_would_change_conclusion: string[];
+    by_component: { component: string; confidence: Confidence; reasoning: string }[];
+  };
+  narrative: {
+    for_low_income: string;
+    for_middle_income: string;
+    for_upper_income: string;
+    for_small_business: string;
+    biggest_uncertainty: string;
+  };
+}
+
+interface ResultsPanelProps {
+  report: FullReport | any;
+}
+
+// ─── Safe helpers (all accept unknown/undefined input) ────────────────────────
+
+const CONF_STYLES = {
   HIGH:   { pill: "border-emerald-500/30 bg-emerald-950/40 text-emerald-400", dot: "bg-emerald-400", label: "High confidence" },
   MEDIUM: { pill: "border-amber-500/25 bg-amber-950/30 text-amber-400",      dot: "bg-amber-400",   label: "Medium confidence" },
   LOW:    { pill: "border-slate-500/30 bg-slate-800/40 text-slate-400",       dot: "bg-slate-400",   label: "Low confidence" },
-};
+} as const;
 
-// Safe lookup — normalises any casing from the API, falls back to MEDIUM
-function confStyle(raw: string | undefined | null) {
-  if (!raw) return CONF_STYLES.MEDIUM;
-  const key = raw.toUpperCase() as Confidence;
-  return CONF_STYLES[key] ?? CONF_STYLES.MEDIUM;
+function getConfStyle(raw: unknown) {
+  if (typeof raw !== "string" || !raw) return CONF_STYLES.MEDIUM;
+  const key = raw.toUpperCase();
+  if (key in CONF_STYLES) {
+    return CONF_STYLES[key as keyof typeof CONF_STYLES];
+  }
+  return CONF_STYLES.MEDIUM;
 }
 
-// Severity: used for cost/risk indicators — not outcome badness
-const SEVERITY_STYLES: Record<"HIGH" | "MEDIUM" | "LOW", { bar: string; text: string; label: string }> = {
-  HIGH:   { bar: "bg-orange-400/70",  text: "text-orange-400",  label: "High" },
-  MEDIUM: { bar: "bg-amber-400/60",   text: "text-amber-400",   label: "Medium" },
-  LOW:    { bar: "bg-teal-400/60",    text: "text-teal-400",    label: "Low" },
-};
+const SEVERITY_STYLES = {
+  HIGH:   { bar: "bg-orange-400/70",  text: "text-orange-400",  label: "High",   width: "75%" },
+  MEDIUM: { bar: "bg-amber-400/60",   text: "text-amber-400",   label: "Medium", width: "48%" },
+  LOW:    { bar: "bg-teal-400/60",    text: "text-teal-400",    label: "Low",    width: "22%" },
+} as const;
+
+function getSeverityStyle(raw: unknown) {
+  if (typeof raw !== "string" || !raw) return SEVERITY_STYLES.MEDIUM;
+  const key = raw.toUpperCase();
+  if (key in SEVERITY_STYLES) {
+    return SEVERITY_STYLES[key as keyof typeof SEVERITY_STYLES];
+  }
+  return SEVERITY_STYLES.MEDIUM;
+}
+
+// Safe number: returns 0 for null/undefined/NaN/Infinity
+function safeNum(v: unknown, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// Safe array: returns [] for null/undefined
+function safeArr<T>(v: T[] | null | undefined): T[] {
+  return Array.isArray(v) ? v : [];
+}
+
+// Safe string: returns "" for null/undefined
+function safeStr(v: unknown): string {
+  return typeof v === "string" ? v : String(v ?? "");
+}
+
+function shortText(v: unknown, max = 120): string {
+  const s = safeStr(v).trim();
+  // Show significantly more text while keeping existing call sites unchanged.
+  const effectiveMax = Math.max(1, Math.round(max * 2.5));
+  if (s.length <= effectiveMax) return s;
+  return `${s.slice(0, effectiveMax - 1)}...`;
+}
 
 // ─── Shared atoms ─────────────────────────────────────────────────────────────
 
-function ConfBadge({ c, large }: { c: string | undefined | null; large?: boolean }) {
-  const s = confStyle(c);
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  const tooltipText: Record<string, string> = {
-    "High confidence": "Backed by direct data from government APIs or peer-reviewed studies",
-    "Medium confidence": "Based on established economic models with named assumptions",
-    "Low confidence": "Agent reasoning flagged as uncertain — treat as directional only",
-  };
-
+function ConfBadge({ c }: { c: unknown }) {
+  const s = getConfStyle(c);
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border font-medium relative cursor-help",
-        large ? "px-3.5 py-1 text-sm gap-2" : "px-2.5 py-0.5 text-xs",
-        s.pill,
-      )}
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
-      <span className={cn(large ? "h-2 w-2" : "h-1.5 w-1.5", "rounded-full", s.dot)} />
-      {large ? null : <span className="ml-1.5" />}
+    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", s.pill)}>
+      <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", s.dot)} />
       {s.label}
-      {showTooltip && (
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-black/95 border border-white/10 px-3 py-2 text-[11px] text-white/70 leading-relaxed z-50 pointer-events-none shadow-lg">
-          {tooltipText[s.label] ?? "Confidence assessment from multi-agent analysis"}
-        </span>
-      )}
     </span>
   );
 }
@@ -124,17 +228,15 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
-// Section headings — readable, not decorative
 function SectionHeading({ label, sub }: { label: string; sub?: string }) {
   return (
     <div className="mb-5">
       <h3 className="text-base font-semibold text-white/85">{label}</h3>
-      {sub && <p className="mt-0.5 text-sm text-white/45">{sub}</p>}
+      {sub && <p className="mt-0.5 text-[13px] text-white/60">{sub}</p>}
     </div>
   );
 }
 
-// Step indicator for the page narrative flow
 function StepBadge({ n, label }: { n: number; label: string }) {
   return (
     <div className="mb-4 flex items-center gap-3">
@@ -147,227 +249,170 @@ function StepBadge({ n, label }: { n: number; label: string }) {
   );
 }
 
-// ─── 1: Hero header ───────────────────────────────────────────────────────────
+// ─── 1: Impact verdict card (MINIMALIST)  ────────────────────────────────────
 
-function PolicyHeader({ report }: { report: SynthesisReport }) {
-  const metrics = report.headline_metrics ?? [];
-  const pos = metrics.filter((m) => m.direction === "positive").length;
-  const neg = metrics.filter((m) => m.direction === "negative").length;
-  const total = pos + neg || 1;
-  const posW = Math.round((pos / total) * 100);
+function PolicyHeader({ report }: { report: FullReport }) {
+  const metrics = safeArr(report.headline_metrics);
+  const pos = metrics.filter((m) => m?.direction === "positive").length;
+  const neg = metrics.filter((m) => m?.direction === "negative").length;
+  const agentsCompleted = safeArr(report.meta?.agents_completed);
+  const headlineConf = getConfStyle(report.headline?.confidence);
 
-  const headlineConf = confStyle(report.headline?.confidence);
-
-  // Verdict border color follows confidence — not always emerald
-  const verdictBorder: Record<string, string> = {
-    HIGH: "border-emerald-500/60 bg-emerald-950/20",
-    MEDIUM: "border-amber-500/50 bg-amber-950/15",
-    LOW: "border-slate-500/40 bg-slate-800/15",
-  };
-  const verdictLabel: Record<string, string> = {
-    HIGH: "text-emerald-400/70",
-    MEDIUM: "text-amber-400/70",
-    LOW: "text-slate-400/70",
-  };
-  const confKey = (report.headline?.confidence ?? "MEDIUM").toUpperCase();
-
-// Step indicator for the page narrative flow
-function StepBadge({ n, label }: { n: number; label: string }) {
   return (
     <Card className="p-6">
-      {/* Tags row */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {report.policy?.geography && (
-          <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1 text-xs text-white/55">
-            {report.policy.geography}
-          </span>
-        )}
-        <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1 text-xs text-white/55">
-          {report.meta?.agents_completed?.length ?? 0} agents · {report.meta?.total_tool_calls ?? 0} data calls
-        </span>
-        {report.policy?.estimated_annual_cost && (
-          <span className="rounded-full border border-orange-500/25 bg-orange-950/25 px-3 py-1 text-xs text-orange-300/80">
-            Federal cost: {report.policy.estimated_annual_cost}/yr
-          </span>
-        )}
-        <span className={cn("ml-auto rounded-full border px-3 py-1 text-xs font-medium", headlineConf.pill)}>
-          {headlineConf.label}
-        </span>
-      </div>
-      <span className="text-xs font-medium uppercase tracking-widest text-white/40">{label}</span>
-      <div className="h-px flex-1 bg-white/8" />
-    </div>
-  );
-}
-
-      {/* Title */}
-      <h1 className="mb-1 text-2xl font-semibold leading-snug tracking-tight text-white">
-        {report.policy?.title ?? "Policy Analysis"}
-      </h1>
-      <p className="mb-5 text-base text-white/50">{report.policy?.one_liner ?? ""}</p>
-
-      {/* Verdict callout — color follows confidence */}
-      <div className={cn("mb-5 rounded-xl border-l-4 px-4 py-3", verdictBorder[confKey] ?? verdictBorder.MEDIUM)}>
-        <div className={cn("mb-0.5 text-xs font-semibold uppercase tracking-widest", verdictLabel[confKey] ?? verdictLabel.MEDIUM)}>
-          Overall verdict
+      <div className="mb-4 flex items-start justify-between">
+        <div>
+          <h1 className="mb-1 text-2xl font-bold text-white">{shortText(report.policy?.title, 80)}</h1>
+          <p className="text-xs text-white/40">{report.policy?.geography}</p>
         </div>
-        <p className="text-[15px] font-medium leading-snug text-white/90">{report.headline?.verdict ?? ""}</p>
+        <ConfBadge c={report.headline?.confidence} />
       </div>
 
-      {/* Signal bar */}
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between text-sm text-white/50">
-          <span>{pos} positive outcomes</span>
-          <span>{neg} costs / risks</span>
+      {/* Impact verdict box with visual  */}
+      <div className="relative mb-5 overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-4">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-lg">⚡</span>
+          <span className="text-xs font-semibold text-emerald-400">VERDICT</span>
         </div>
-        <div className="flex h-3 overflow-hidden rounded-full bg-white/8">
-          <div className="bg-emerald-500/65 transition-all duration-700" style={{ width: `${posW}%` }} />
-          <div className="flex-1 bg-red-500/45" />
+        <p className="text-sm font-semibold leading-snug text-white/90">
+          {shortText(report.headline?.verdict, 120)}
+        </p>
+      </div>
+
+      {/* Outcome ratio visual  */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs text-white/40">
+          <span>{pos} Gains</span>
+          <span>{neg} Costs</span>
         </div>
-        <div className="flex justify-between text-xs text-white/35">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500/65" />Gains
-          </span>
-          <span className="flex items-center gap-1.5">
-            Costs &amp; risks
-            <span className="h-2 w-2 rounded-full bg-red-500/45" />
-          </span>
+        <div className="flex h-2 overflow-hidden rounded-full bg-white/8">
+          <div className="bg-emerald-500/70" style={{ width: `${pos ? Math.round((pos / (pos + neg || 1)) * 100) : 0}%` }} />
+          <div className="flex-1 bg-red-500/50" />
         </div>
+      </div>
+
+      {/* Meta row */}
+      <div className="mt-4 flex gap-3 text-xs text-white/40">
+        <span>📊 {safeNum(report.meta?.total_tool_calls)} calls</span>
+        <span>·</span>
+        <span>🤖 {agentsCompleted.length} agents</span>
+        <span>·</span>
+        <span>💰 {report.policy?.estimated_annual_cost}</span>
       </div>
     </Card>
   );
 }
 
-// ─── 2: KPI strip ─────────────────────────────────────────────────────────────
-
-function KpiStrip({ metrics }: { metrics: SynthesisReport["headline_metrics"] }) {
-  if (!metrics || metrics.length === 0) return null;
+function SankeyCard({ data }: { data: SankeyData | null | undefined }) {
+  if (!data || safeArr(data.nodes).length < 2 || safeArr(data.links).length < 1) return null;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {metrics.slice(0, 5).map((m) => (
+    <Card>
+      <SectionHeading label="Economic flow map" sub="Policy dollars moving through sectors" />
+      <SankeyDiagram data={data} />
+    </Card>
+  );
+}
+
+// ─── 2: Headline metrics (HEADLINE VISUAL GRID) ────────────────────────────────
+
+function KpiStrip({ metrics }: { metrics: HeadlineMetric[] | null | undefined }) {
+  const safe = safeArr(metrics).slice(0, 4).filter(Boolean);
+  if (safe.length === 0) return null;
+
+  const getIcon = (label: string) => {
+    if (label.toLowerCase().includes("revenue")) return "💰";
+    if (label.toLowerCase().includes("employment")) return "👥";
+    if (label.toLowerCase().includes("price") || label.toLowerCase().includes("cost")) return "📈";
+    if (label.toLowerCase().includes("household")) return "🏠";
+    return "📊";
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {safe.map((m) => (
         <div
           key={m.id}
           className={cn(
-            "rounded-xl border p-4",
+            "rounded-lg border p-4",
             m.direction === "positive"
-              ? "border-emerald-500/20 bg-emerald-950/15"
-              : "border-red-500/20 bg-red-950/15",
+              ? "border-emerald-500/25 bg-emerald-950/20"
+              : "border-red-500/25 bg-red-950/20",
           )}
         >
-          <div className="mb-2 text-xs font-medium text-white/50 leading-tight">{m.label}</div>
-          <div className={cn("text-[22px] font-semibold leading-none tracking-tight",
+          <div className="mb-2 text-2xl">{getIcon(m.label)}</div>
+          <div className="mb-2 text-[13px] font-medium text-white/60 line-clamp-3">{shortText(m.label, 32)}</div>
+          <div className={cn("text-xl font-bold",
             m.direction === "positive" ? "text-emerald-300" : "text-red-300")}>
-            {m.value}
+            {shortText(m.value, 16)}
           </div>
           {m.range && (
-            <div className="mt-1 text-[11px] text-white/28 tabular-nums">
-              {m.range.low} – {m.range.high}
+            <div className="mt-1.5 text-[10px] text-white/35">
+              {m.range.low}–{m.range.high}
             </div>
           )}
-          <div className="mt-2.5">
-            <ConfBadge c={m.confidence} />
-          </div>
         </div>
       ))}
     </div>
   );
 }
 
-// ─── 3: Waterfall chart — SVG ─────────────────────────────────────────────────
+// ─── 3: Waterfall chart (MINIMAL TEXT VERSION) ────────────────────────────────
 
-function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
+function WaterfallChart({ data }: { data: WaterfallData }) {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
-  if (!data?.steps || data.steps.length === 0) return <div className="text-sm text-white/30">No waterfall data available</div>;
-  const steps = data.steps.filter((s) => s.value !== 0 && s.type !== "neutral");
-  if (steps.length === 0) return null;
-  const maxVal = Math.max(...steps.map((s) => Math.abs(s.value))) || 1;
 
-  const BAR_H = 34;
-  const BAR_GAP = 5;
-  const LABEL_W = 156;
-  const TRACK_W = 280;
-  const CUM_W = 64;
-  const PAD = 10;
+  const steps = safeArr(data?.steps).filter((s) => s?.type !== "neutral").slice(0, 8);
+  if (steps.length === 0) return <p className="text-xs text-white/35">No waterfall data.</p>;
+
+  const absVals = steps.map((s) => Math.abs(safeNum(s.value)));
+  const maxVal = Math.max(...absVals, 1);
+
+  const BAR_H = 28;
+  const BAR_GAP = 4;
+  const LABEL_W = 120;
+  const TRACK_W = 240;
+  const VAL_W = 70;
+  const PAD = 8;
   const svgH = steps.length * (BAR_H + BAR_GAP) + PAD * 2;
-  const SVG_W = LABEL_W + TRACK_W + CUM_W + PAD * 3;
+  const SVG_W = LABEL_W + TRACK_W + VAL_W + PAD * 2;
+
+  const netMonthly = safeNum(data.net_monthly);
 
   return (
     <div>
-      <div className="mb-1 text-sm text-white/50">{data.subtitle}</div>
-      <div className="mb-5 flex items-center gap-4 text-xs text-white/35">
-        <span>{data.household_profile}</span>
-        <span className="ml-auto flex items-center gap-3">
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded bg-emerald-500/50" />Gain</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded bg-red-500/40" />Cost</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded bg-emerald-500/70" />Net</span>
-          <span className="text-white/20">Cumulative →</span>
-        </span>
-      </div>
+      <div className="mb-3 text-xs text-white/35">{shortText(data.subtitle, 70)}</div>
 
       <div className="overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 ${SVG_W} ${svgH}`} style={{ minWidth: 460 }}>
+        <svg width="100%" viewBox={`0 0 ${SVG_W} ${svgH}`} style={{ minWidth: 420 }}>
           {steps.map((step, i) => {
             const isNet = step.type === "net";
             const isInflow = step.type === "inflow";
-            const pct = Math.round((Math.abs(step.value) / maxVal) * 100);
-            const barW = Math.max(4, Math.round((pct / 100) * TRACK_W));
+            const absVal = Math.abs(safeNum(step.value));
+            const pct = absVal / maxVal;
+            const barW = Math.max(3, Math.round(pct * TRACK_W));
             const y = PAD + i * (BAR_H + BAR_GAP);
             const isHovered = hoveredStep === step.label;
 
-            const barFill = isNet
-              ? "rgba(52,211,153,0.65)"
-              : isInflow
-                ? "rgba(52,211,153,0.38)"
-                : "rgba(239,68,68,0.35)";
+            const barFill = isNet ? "rgba(52,211,153,0.7)" : isInflow ? "rgba(52,211,153,0.4)" : "rgba(239,68,68,0.35)";
             const textFill = isNet ? "#6ee7b7" : isInflow ? "#a7f3d0" : "#fca5a5";
-            const labelFill = isNet
-              ? "rgba(255,255,255,0.90)"
-              : isHovered
-                ? "rgba(255,255,255,0.75)"
-                : "rgba(255,255,255,0.55)";
+            const labelFill = isHovered ? "rgba(255,255,255,0.75)" : isNet ? "rgba(255,255,255,0.70)" : "rgba(255,255,255,0.45)";
+            const label = shortText(step.label, 16);
 
             return (
-              <g key={`${step.label}-${i}`}
-                className="cursor-default"
+              <g key={`step-${i}`}
                 onMouseEnter={() => setHoveredStep(step.label)}
                 onMouseLeave={() => setHoveredStep(null)}>
-                {/* Label */}
-                <text x={LABEL_W - 10} y={y + BAR_H / 2}
+                <text x={LABEL_W - 6} y={y + BAR_H / 2}
                   textAnchor="end" dominantBaseline="central"
-                  fill={labelFill}
-                  fontSize={isNet ? "13" : "12"}
-                  fontWeight={isNet ? "600" : "400"}>
-                  {step.label}
+                  fill={labelFill} fontSize="11" fontWeight={isNet ? "600" : "400"}>
+                  {label}
                 </text>
-
-                {/* Track bg */}
-                <rect x={LABEL_W + PAD} y={y} width={TRACK_W} height={BAR_H} rx="6"
-                  fill={isHovered ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)"} />
-
-                {/* Bar */}
-                <rect x={LABEL_W + PAD} y={y} width={barW} height={BAR_H} rx="6" fill={barFill} />
-
-                {/* Value label in bar */}
-                {barW > 54 && (
-                  <text x={LABEL_W + PAD + barW - 10} y={y + BAR_H / 2}
-                    textAnchor="end" dominantBaseline="central"
-                    fill={textFill} fontSize="12" fontWeight="500">
-                    {isInflow ? "+" : ""}${Math.abs(step.value)}
-                  </text>
-                )}
-                {barW <= 54 && (
-                  <text x={LABEL_W + PAD + barW + 6} y={y + BAR_H / 2}
-                    dominantBaseline="central"
-                    fill={textFill} fontSize="11">
-                    {isInflow ? "+" : "–"}${Math.abs(step.value)}
-                  </text>
-                )}
-
-                {/* Cumulative */}
-                <text x={LABEL_W + PAD + TRACK_W + 10} y={y + BAR_H / 2}
-                  dominantBaseline="central"
-                  fill="rgba(255,255,255,0.28)" fontSize="11" fontFamily="monospace">
-                  ${step.cumulative}
+                <rect x={LABEL_W + PAD} y={y} width={TRACK_W} height={BAR_H} rx="5"
+                  fill={isHovered ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"} />
+                <rect x={LABEL_W + PAD} y={y} width={barW} height={BAR_H} rx="5" fill={barFill} />
+                <text x={LABEL_W + PAD + TRACK_W + 8} y={y + BAR_H / 2}
+                  dominantBaseline="central" fill={textFill} fontSize="12" fontWeight="600" fontFamily="monospace">
+                  {isInflow ? "+" : "–"}${absVal}
                 </text>
               </g>
             );
@@ -375,880 +420,471 @@ function WaterfallChart({ data }: { data: SynthesisReport["waterfall"] }) {
         </svg>
       </div>
 
-      {/* Net summary */}
-      <div className="mt-5 grid grid-cols-3 gap-3">
-        {[
-          { label: "Net monthly gain", value: `+$${data.net_monthly ?? 0}`, big: true },
-          { label: "Over a year", value: `+$${(data.net_annual ?? 0).toLocaleString()}` },
-          { label: "% of income", value: `+${data.pct_of_income ?? 0}%` },
-        ].map((s) => (
-          <div key={s.label}
-            className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 text-center">
-            <div className="text-xs text-white/40">{s.label}</div>
-            <div className={cn("mt-1 font-semibold text-emerald-300", s.big ? "text-2xl" : "text-lg")}>
-              {s.value}
-            </div>
-          </div>
-        ))}
+      {/* Net impact summary  */}
+      <div className="mt-4 rounded-lg border border-emerald-500/25 bg-emerald-950/15 p-3 text-center">
+        <div className="text-xs text-white/40">Net Monthly Impact</div>
+        <div className={cn("text-2xl font-bold", netMonthly >= 0 ? "text-emerald-300" : "text-red-300")}>
+          {netMonthly >= 0 ? "+" : ""}{netMonthly}/mo
+        </div>
+        <div className="mt-1 text-xs text-white/35">{netMonthly * 12 >= 0 ? "+" : ""}{netMonthly * 12}/yr</div>
       </div>
     </div>
   );
 }
 
-// ─── 4: Category chart — horizontal SVG bars ─────────────────────────────────
+// ─── 4: Category chart (VISUAL ONLY) ──────────────────────────────────────────
 
-function CategoryChart({ categories }: { categories: SynthesisReport["category_breakdown"]["categories"] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (!categories || categories.length === 0) return <div className="text-sm text-white/30">No category data available</div>;
-  const sorted = [...categories].sort(
-    (a, b) => Math.abs(b.dollar_impact_monthly?.central ?? 0) - Math.abs(a.dollar_impact_monthly?.central ?? 0),
+function CategoryChart({ categories }: { categories: CategoryItem[] | null | undefined }) {
+  const safe = safeArr(categories).filter(Boolean).slice(0, 6);
+  if (safe.length === 0) return <p className="text-xs text-white/35">No data</p>;
+
+  const sorted = [...safe].sort(
+    (a, b) => Math.abs(safeNum(b.dollar_impact_monthly?.central)) - Math.abs(safeNum(a.dollar_impact_monthly?.central)),
   );
-  const maxAbs = Math.max(...sorted.map((c) => Math.abs(c.dollar_impact_monthly?.central ?? 0))) || 1;
-
-  const BAR_H = 30;
-  const BAR_GAP = 7;
-  const LABEL_W = 148;
-  const TRACK_W = 240;
-  const VAL_W = 80;
-  const PAD = 8;
-  const svgH = sorted.length * (BAR_H + BAR_GAP) + PAD * 2;
-  const SVG_W = LABEL_W + TRACK_W + VAL_W + PAD * 2;
 
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 ${SVG_W} ${svgH}`} style={{ minWidth: 420 }}>
-          {sorted.map((cat, i) => {
-            const centralVal = cat.dollar_impact_monthly?.central ?? 0;
-            const isNeg = centralVal < 0;
-            const pct = Math.round((Math.abs(centralVal) / maxAbs) * 100);
-            const barW = Math.max(4, Math.round((pct / 100) * TRACK_W));
-            const y = PAD + i * (BAR_H + BAR_GAP);
-            // Costs use orange, not pure red — it's a cost, not a catastrophe
-            const barFill = isNeg ? "rgba(249,115,22,0.38)" : "rgba(52,211,153,0.38)";
-            const valFill = isNeg ? "#fdba74" : "#6ee7b7";
-            const isActive = expanded === cat.name;
+    <div className="space-y-2.5">
+      {sorted.map((cat) => {
+        const central = safeNum(cat.dollar_impact_monthly?.central);
+        const pct = safeNum(cat.pct_change?.central);
+        const isNeg = central < 0;
+        const absVal = Math.abs(central);
 
-            return (
-              <g key={cat.name} className="cursor-pointer"
-                onClick={() => setExpanded(isActive ? null : cat.name)}>
-                <text x={LABEL_W - 10} y={y + BAR_H / 2}
-                  textAnchor="end" dominantBaseline="central"
-                  fill={isActive ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.60)"}
-                  fontSize="12">
-                  {cat.name}
-                </text>
-                <rect x={LABEL_W + PAD} y={y} width={TRACK_W} height={BAR_H} rx="5"
-                  fill={isActive ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.04)"} />
-                <rect x={LABEL_W + PAD} y={y} width={barW} height={BAR_H} rx="5" fill={barFill} />
-                {barW > 36 && (
-                  <text x={LABEL_W + PAD + 8} y={y + BAR_H / 2}
-                    dominantBaseline="central" fill={valFill} fontSize="11" fontWeight="500">
-                    {isNeg ? "" : "+"}{cat.pct_change?.central ?? 0}%
-                  </text>
-                )}
-                <text x={LABEL_W + PAD + TRACK_W + 10} y={y + BAR_H / 2}
-                  dominantBaseline="central"
-                  fill={valFill} fontSize="12" fontWeight="500" fontFamily="monospace">
-                  {isNeg ? "–" : "+"}${Math.abs(centralVal)}/mo
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* Expanded detail — outside SVG */}
-      {expanded && (() => {
-        const cat = sorted.find((c) => c.name === expanded);
-        if (!cat) return null;
         return (
-          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-white/85">{cat.name}</span>
-              <ConfBadge c={cat.confidence} />
+          <div key={cat.name} className="group cursor-pointer">
+            <div className="mb-1 flex items-end justify-between">
+              <span className="text-sm font-medium text-white/75">{shortText(cat.name, 24)}</span>
+              <div className="flex items-baseline gap-2">
+                <span className={cn("text-sm font-bold", isNeg ? "text-red-300" : "text-emerald-300")}>
+                  {isNeg ? "–" : "+"}${absVal}
+                </span>
+                <span className="text-xs text-white/40">{pct > 0 ? "+" : ""}{pct}%</span>
+              </div>
             </div>
-            <p className="mb-2 text-sm text-white/55">{cat.explanation}</p>
-            {cat.note && <p className="mb-2 text-xs text-amber-300/70">{cat.note}</p>}
-            <div className="text-xs text-white/30 tabular-nums">
-              Range: ${cat.dollar_impact_monthly?.low ?? 0} – ${cat.dollar_impact_monthly?.high ?? 0}/mo
+            <div className="h-2 overflow-hidden rounded-full bg-white/8">
+              <div
+                className={cn("h-full transition-all", isNeg ? "bg-orange-500/60" : "bg-emerald-500/60")}
+                style={{ width: `${Math.min(100, Math.abs(pct * 20))}%` }}
+              />
+            </div>
+            <div className="mt-1.5 text-xs text-white/35 opacity-0 transition-opacity group-hover:opacity-100">
+              {shortText(cat.explanation, 60)}
             </div>
           </div>
         );
-      })()}
+      })}
     </div>
   );
 }
 
-// ─── 5: Timeline chart ────────────────────────────────────────────────────────
+// ─── 5: Timeline chart (SIMPLIFIED) ───────────────────────────────────────────
 
-function TimelineChart({ phases, household_profile }: { phases: SynthesisReport["timeline"]["phases"]; household_profile: string }) {
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  if (!phases || phases.length < 2) return <div className="text-sm text-white/30">Insufficient timeline data</div>;
-  const maxVal = Math.max(...phases.map((p) => p.cumulative_net_monthly?.high ?? 0)) || 1;
-  const W = 540;
-  const H = 150;
-  const PL = 48; const PR = 20; const PT = 14; const PB = 34;
-  const iW = W - PL - PR; const iH = H - PT - PB;
-  const xOf = (i: number) => PL + (i / (phases.length - 1)) * iW;
-  const yOf = (v: number) => PT + iH - (v / maxVal) * iH;
+function TimelineChart({ phases, household_profile }: { phases: TimelinePhase[] | null | undefined; household_profile: string }) {
+  const safe = safeArr(phases).filter(Boolean).slice(0, 5);
+  if (safe.length < 2) return <p className="text-xs text-white/35">Not enough data</p>;
 
-  const highPts = phases.map((p, i) => `${xOf(i)},${yOf(p.cumulative_net_monthly?.high ?? 0)}`).join(" ");
-  const lowPtsRev = [...phases].reverse().map((p, i) =>
-    `${xOf(phases.length - 1 - i)},${yOf(p.cumulative_net_monthly?.low ?? 0)}`
-  ).join(" ");
-  const centralPts = phases.map((p, i) => `${xOf(i)},${yOf(p.cumulative_net_monthly?.central ?? 0)}`).join(" ");
-
-  // Mood → line color (no red — all phases net positive in this schema)
-  const moodColor: Record<string, string> = {
-    optimistic: "#34d399", stable: "#60a5fa", settling: "#f59e0b",
-    new_normal: "#c4b5fd", uncertain: "#94a3b8",
+  const moodEmoji: Record<string, string> = {
+    optimistic: "😊", stable: "😐", settling: "🤔",
+    new_normal: "📊", uncertain: "❓",
   };
 
   return (
-    <div>
-      <div className="mb-4 text-xs text-white/35">{household_profile}</div>
-      <div className="overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ minWidth: 380 }}>
-          {/* Y gridlines */}
-          {[0, Math.round(maxVal * 0.5), maxVal].map((t) => (
-            <g key={t}>
-              <line x1={PL} y1={yOf(t)} x2={W - PR} y2={yOf(t)}
-                stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-              <text x={PL - 6} y={yOf(t)} textAnchor="end" dominantBaseline="central"
-                fill="rgba(255,255,255,0.28)" fontSize="10">
-                ${t}
-              </text>
-            </g>
-          ))}
+    <div className="space-y-2.5">
+      {safe.map((p, i) => {
+        const central = safeNum(p.cumulative_net_monthly?.central);
+        const emoji = moodEmoji[p.mood ?? ""] ?? "📊";
 
-          {/* Confidence band */}
-          <polygon points={`${highPts} ${lowPtsRev}`} fill="rgba(52,211,153,0.08)" />
-
-          {/* Central line */}
-          <polyline points={centralPts} fill="none"
-            stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-
-          {/* Points + interaction */}
-          {phases.map((p, i) => {
-            const x = xOf(i); const y = yOf(p.cumulative_net_monthly?.central ?? 0);
-            const active = activeIdx === i;
-            const color = moodColor[p.mood] ?? "#94a3b8";
-            return (
-              <g key={`pt-${i}`}
-                onMouseEnter={() => setActiveIdx(i)}
-                onMouseLeave={() => setActiveIdx(null)}>
-                {active && (
-                  <line x1={x} y1={PT} x2={x} y2={H - PB}
-                    stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 3" />
-                )}
-                <circle cx={x} cy={y} r={active ? 5 : 3.5} fill={color}
-                  stroke="#111318" strokeWidth="2" className="cursor-pointer" />
-                {/* Tooltip */}
-                {active && (
-                  <g>
-                    <rect x={Math.min(x - 65, W - 145)} y={y - 50}
-                      width={140} height={42} rx="6"
-                      fill="#181C23" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
-                    <text x={Math.min(x - 65, W - 145) + 10} y={y - 33}
-                      fill="rgba(255,255,255,0.88)" fontSize="13" fontWeight="600">
-                      +${p.cumulative_net_monthly?.central ?? 0}/mo
-                    </text>
-                    <text x={Math.min(x - 65, W - 145) + 10} y={y - 18}
-                      fill="rgba(255,255,255,0.38)" fontSize="10">
-                      range ${p.cumulative_net_monthly?.low ?? 0}–${p.cumulative_net_monthly?.high ?? 0}
-                    </text>
-                  </g>
-                )}
-                {/* X label */}
-                <text x={x} y={H - PB + 14} textAnchor="middle"
-                  fill="rgba(255,255,255,0.35)" fontSize="10">
-                  {p.label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* Phase rows */}
-      <div className="mt-3 space-y-1.5">
-        {phases.map((p, i) => {
-          const color = moodColor[p.mood] ?? "#94a3b8";
-          const isActive = activeIdx === i;
-          return (
-            <div key={`row-${i}`}
-              className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
-                isActive ? "border-white/14 bg-white/5" : "border-white/6 hover:border-white/10",
-              )}
-              onMouseEnter={() => setActiveIdx(i)}
-              onMouseLeave={() => setActiveIdx(null)}>
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-              <span className="w-20 shrink-0 text-sm font-medium text-white/65">{p.label}</span>
-              <span className="flex-1 truncate text-sm text-white/38">{p.dominant_driver}</span>
-              <span className="shrink-0 tabular-nums text-sm font-semibold text-emerald-300">
-                +${p.cumulative_net_monthly?.central ?? 0}/mo
+        return (
+          <div key={i} className="rounded-lg border border-white/8 bg-white/[0.02] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">{emoji}</span>
+                <span className="text-sm font-medium text-white/75">{shortText(p.label, 18)}</span>
+              </div>
+              <span className={cn("text-sm font-bold", central >= 0 ? "text-emerald-300" : "text-red-300")}>
+                +${central}/mo
               </span>
             </div>
-          );
-        })}
-      </div>
+            <div className="text-xs text-white/40 line-clamp-3">{shortText(p.dominant_driver, 50)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ─── 6: Winners & Losers ──────────────────────────────────────────────────────
+// ─── 6: Winners & Losers (VISUAL PROFILES)  ──────────────────────────────────
 
-// ProfileCard as standalone component — NO useState in map()
-function ProfileCard({
-  profile,
-  cardType,
-}: {
-  profile: SynthesisReport["winners_losers"]["winners"][number];
-  cardType: "winner" | "loser" | "mixed";
-}) {
-  const [open, setOpen] = useState(false);
+// CardType uses singular keys; WLTab uses plural — kept separate to avoid mismatch
+type CardType = "winner" | "loser" | "mixed";
+type WLTab = "winners" | "losers" | "mixed";
 
-  const styles = {
-    winner: {
-      border: "border-emerald-500/20",
-      bg: "bg-emerald-950/12",
-      dot: "bg-emerald-400",
-      num: "text-emerald-300",
-    },
-    loser: {
-      // Losers: use orange/coral — it's a bad outcome but not alarming red
-      border: "border-orange-500/20",
-      bg: "bg-orange-950/10",
-      dot: "bg-orange-400",
-      num: "text-orange-300",
-    },
-    mixed: {
-      border: "border-amber-500/18",
-      bg: "bg-amber-950/10",
-      dot: "bg-amber-400",
-      num: "text-amber-300",
-    },
-  }[cardType];
+const CARD_STYLES: Record<CardType, { border: string; bg: string; dot: string; num: string; emoji: string }> = {
+  winner: { border: "border-emerald-500/25", bg: "bg-emerald-950/15", dot: "bg-emerald-400", num: "text-emerald-300", emoji: "🎯" },
+  loser:  { border: "border-orange-500/25",  bg: "bg-orange-950/12",  dot: "bg-orange-400",  num: "text-orange-300", emoji: "⚠️" },
+  mixed:  { border: "border-amber-500/20",   bg: "bg-amber-950/12",   dot: "bg-amber-400",   num: "text-amber-300", emoji: "⚖️" },
+};
+
+function tabToCardType(tab: WLTab): CardType {
+  if (tab === "winners") return "winner";
+  if (tab === "losers")  return "loser";
+  return "mixed";
+}
+
+function ProfileCard({ profile, cardType }: { profile: WinnerLoserProfile; cardType: CardType }) {
+  const styles = CARD_STYLES[cardType] ?? CARD_STYLES.mixed;
 
   return (
-    <div className={cn("rounded-xl border p-4", styles.border, styles.bg)}>
-      <div className="mb-2 flex items-start gap-2">
-        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", styles.dot)} />
-        <span className="text-sm font-semibold leading-snug text-white/85">{profile.profile}</span>
+    <div className={cn("rounded-lg border p-4", styles.border, styles.bg)}>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-2xl">{styles.emoji}</span>
+        <ConfBadge c={profile.confidence} />
       </div>
-      <div className={cn("mb-1 text-xl font-semibold tabular-nums leading-none", styles.num)}>
-        {profile.net_monthly_range}
-        <span className="ml-1 text-sm font-normal text-white/35">/mo</span>
+      <div className={cn("mb-1 text-sm font-medium text-white/80")}>{shortText(profile.profile, 28)}</div>
+      <div className={cn("text-xl font-bold", styles.num)}>
+        {safeStr(profile.net_monthly_range)}/mo
       </div>
-      {profile.pct_of_income_range !== "N/A" && (
-        <div className="mb-3 text-xs text-white/35">{profile.pct_of_income_range} of income</div>
-      )}
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-xs text-white/35 hover:text-white/60 transition-colors"
-      >
-        Why? <Chevron open={open} />
-      </button>
-      {open && (
-        <div className="mt-3 space-y-2 border-t border-white/8 pt-3">
-          <p className="text-sm leading-6 text-white/55">{profile.why}</p>
-          {profile.caveat && (
-            <p className="text-xs text-amber-300/65">{profile.caveat}</p>
-          )}
-          {profile.depends_on && (
-            <p className="text-xs text-white/30">Depends on: {profile.depends_on}</p>
-          )}
-          <ConfBadge c={profile.confidence} />
-        </div>
+      {profile.pct_of_income_range && profile.pct_of_income_range !== "N/A" && (
+        <div className="mt-2 text-xs text-white/40">{profile.pct_of_income_range}</div>
       )}
     </div>
   );
 }
 
-function WinnersLosers({ data }: { data: SynthesisReport["winners_losers"] }) {
-  type WLTab = "winners" | "losers" | "mixed";
+function WinnersLosers({ data }: { data: FullReport["winners_losers"] }) {
   const [tab, setTab] = useState<WLTab>("winners");
 
-  const winners = data?.winners ?? [];
-  const losers = data?.losers ?? [];
-  const mixed = data?.mixed ?? [];
+  const winners = safeArr(data?.winners).slice(0, 3);
+  const losers  = safeArr(data?.losers).slice(0, 3);
+  const mixed   = safeArr(data?.mixed).slice(0, 3);
 
-  const tabs: { key: WLTab; label: string; activeClass: string; count: number }[] = [
-    {
-      key: "winners", label: "Winners", count: winners.length,
-      activeClass: "border-emerald-500/35 bg-emerald-950/30 text-emerald-300",
-    },
-    {
-      key: "losers", label: "Losers / risks", count: losers.length,
-      activeClass: "border-orange-500/35 bg-orange-950/25 text-orange-300",
-    },
-    {
-      key: "mixed", label: "Mixed", count: mixed.length,
-      activeClass: "border-amber-500/30 bg-amber-950/25 text-amber-300",
-    },
+  const tabs: { key: WLTab; label: string; emoji: string }[] = [
+    { key: "winners", label: "Win",  emoji: "🎯" },
+    { key: "losers",  label: "Lose", emoji: "⚠️" },
+    { key: "mixed",   label: "Mixed", emoji: "⚖️" },
   ];
 
-  const profiles: Record<WLTab, typeof winners> = {
-    winners,
-    losers,
-    mixed,
-  };
+  const profileMap: Record<WLTab, WinnerLoserProfile[]> = { winners, losers, mixed };
+  const activeProfiles = profileMap[tab] ?? [];
+  const cardType = tabToCardType(tab);
 
   return (
     <div className="space-y-4">
-      {/* Distributional verdict */}
       {data?.distributional_verdict && (
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 px-5 py-4">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-400/70">
-            {data.distributional_verdict.progressive_or_regressive ?? "Distributional Impact"}
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-950/12 p-3">
+          <div className="mb-1 text-xs font-semibold text-emerald-400">
+            {safeStr(data.distributional_verdict.progressive_or_regressive)}
           </div>
-          <p className="text-sm leading-6 text-white/65">{data.distributional_verdict.explanation ?? ""}</p>
+          <p className="text-xs leading-snug text-white/60">
+            {shortText(data.distributional_verdict.explanation, 100)}
+          </p>
         </div>
       )}
 
-      {/* Tab row */}
       <div className="flex gap-2">
         {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+          <button key={t.key} onClick={() => setTab(t.key)}
             className={cn(
-              "rounded-full border px-4 py-1.5 text-sm font-medium transition-all duration-150",
-              tab === t.key ? t.activeClass : "border-white/10 text-white/40 hover:text-white/65",
-            )}
-          >
-            {t.label}
-            <span className="ml-1.5 text-xs opacity-60">({t.count})</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {profiles[tab].map((p) => (
-          <ProfileCard key={p.profile} profile={p} cardType={tab === "winners" ? "winner" : tab === "losers" ? "loser" : "mixed"} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── 7: Geographic impact ─────────────────────────────────────────────────────
-
-function GeographicImpact({ regions }: { regions: SynthesisReport["geographic_impact"]["regions"] }) {
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      {regions.map((r) => (
-        <div key={r.id} className="rounded-xl border border-white/10 bg-[var(--bg-surface)] p-5">
-          <div className="mb-1 text-base font-semibold text-white/88">{r.name}</div>
-          <div className="mb-4 text-xs text-white/35">{r.examples}</div>
-
-          {/* Big net number */}
-          <div className="mb-4 text-2xl font-semibold" style={{ color: r.color }}>
-            {r.net_monthly_range_median_hh}
-            <span className="ml-1 text-sm font-normal text-white/30">/mo</span>
-          </div>
-
-          {/* Cost severity meters — orange for high, amber for medium */}
-          <div className="mb-4 space-y-2.5">
-            {[
-              { label: "Rent pressure", severity: r.rent_impact_severity },
-              { label: "Price pressure", severity: r.price_impact_severity },
-            ].map((s) => (
-              <div key={s.label}>
-                <div className="mb-1.5 flex justify-between text-xs text-white/40">
-                  <span>{s.label}</span>
-                  <span className={(SEVERITY_STYLES as Record<string, typeof SEVERITY_STYLES.HIGH>)[s.severity]?.text ?? "text-white/40"}>
-                    {(SEVERITY_STYLES as Record<string, typeof SEVERITY_STYLES.HIGH>)[s.severity]?.label ?? s.severity}
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-white/8">
-                  <div
-                    className={cn("h-full rounded-full transition-all", (SEVERITY_STYLES as Record<string, typeof SEVERITY_STYLES.HIGH>)[s.severity]?.bar ?? "bg-white/20")}
-                    style={{ width: s.severity === "HIGH" ? "75%" : s.severity === "MEDIUM" ? "48%" : "22%" }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <p className="text-xs leading-4 text-white/40">{r.key_factor}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── 8: Confidence radar — SVG pentagon ──────────────────────────────────────
-
-function ConfidenceRadar({ data }: { data: SynthesisReport["confidence_assessment"] }) {
-  const [expandedScenario, setExpandedScenario] = useState(false);
-  const components = (data?.by_component ?? []).slice(0, 5);
-  if (components.length === 0) return <div className="text-sm text-white/30">No confidence data available</div>;
-  const scores: Record<Confidence, number> = { HIGH: 1, MEDIUM: 0.55, LOW: 0.2 };
-
-  const SIZE = 180;
-  const cx = SIZE / 2; const cy = SIZE / 2;
-  const R = 68; const n = components.length;
-
-  function polarPt(i: number, r: number) {
-    const angle = (i * 2 * Math.PI) / n - Math.PI / 2;
-    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
-  }
-
-  const gridLevels = [0.33, 0.67, 1];
-  const dataPoints = components.map((c, i) => polarPt(i, R * (scores[(c.confidence ?? "MEDIUM").toUpperCase() as Confidence] ?? 0.55)));
-  const dataPath = dataPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-
-  return (
-    <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-      {/* Pentagon chart */}
-      <div className="shrink-0 self-center sm:self-start">
-        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-          {gridLevels.map((lvl) => {
-            const pts = Array.from({ length: n }, (_, i) => polarPt(i, R * lvl));
-            const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
-            return <path key={lvl} d={d} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />;
-          })}
-          {components.map((_, i) => {
-            const outer = polarPt(i, R);
-            return <line key={i} x1={cx} y1={cy} x2={outer.x} y2={outer.y}
-              stroke="rgba(255,255,255,0.06)" strokeWidth="1" />;
-          })}
-          <path d={dataPath} fill="rgba(96,165,250,0.18)" stroke="#60a5fa" strokeWidth="1.5" />
-          {dataPoints.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r="3.5" fill="#60a5fa" stroke="#111318" strokeWidth="2" />
-          ))}
-          {components.map((c, i) => {
-            const pt = polarPt(i, R + 20);
-            return (
-              <text key={i} x={pt.x} y={pt.y} textAnchor="middle" dominantBaseline="central"
-                fill="rgba(255,255,255,0.45)" fontSize="10">
-                {c.component.split(" ").slice(0, 2).join(" ")}
-              </text>
-            );
-          })}
-        </svg>
-      </div>
-
-      <div className="flex-1 space-y-2.5">
-        {/* Weakest link — amber, not red */}
-        <div className="rounded-xl border border-amber-500/20 bg-amber-950/15 px-4 py-3">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-amber-400/70">
-            Biggest uncertainty
-          </div>
-          <p className="text-sm font-medium text-white/80">{data?.weakest_link ?? "Unknown"}</p>
-        </div>
-
-        {/* Component confidence rows */}
-        {components.map((c) => (
-          <div key={c.component} className="flex items-center gap-3 rounded-lg border border-white/7 px-3 py-2.5">
-            <ConfBadge c={c.confidence} />
-            <span className="flex-1 text-sm text-white/65">{c.component}</span>
-          </div>
-        ))}
-
-        {/* What would change */}
-        <button
-          onClick={() => setExpandedScenario(!expandedScenario)}
-          className="flex w-full items-center gap-2 rounded-lg border border-white/7 px-3 py-2.5 text-sm text-white/45 hover:text-white/65 transition-colors"
-        >
-          <span className="flex-1 text-left">
-            {(data?.what_would_change_conclusion ?? []).length} scenarios that change this conclusion
-          </span>
-          <Chevron open={expandedScenario} />
-        </button>
-        {expandedScenario && (
-          <div className="space-y-2 rounded-xl border border-white/8 bg-white/[0.02] p-3">
-            {(data?.what_would_change_conclusion ?? []).map((item, i) => (
-              <div key={i} className="flex gap-2.5 text-sm text-white/50">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/50" />
-                {item}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── 9: Narrative — audience tabs (FIXED: text keyed correctly) ───────────────
-
-type NarrativeTab = "low_income" | "middle_income" | "upper_income" | "small_business";
-
-function NarrativePanel({ narrative }: { narrative: SynthesisReport["narrative"] }) {
-  const [activeTab, setActiveTab] = useState<NarrativeTab>("middle_income");
-
-  const tabs: { key: NarrativeTab; label: string }[] = [
-    { key: "low_income",    label: "Low income" },
-    { key: "middle_income", label: "Middle income" },
-    { key: "upper_income",  label: "Upper income" },
-    { key: "small_business", label: "Small business" },
-  ];
-
-  // Explicit mapping — no computed key indexing, avoids silent mismatch bugs
-  function getContent(tab: NarrativeTab): string {
-    if (tab === "low_income")    return narrative?.for_low_income ?? "";
-    if (tab === "middle_income") return narrative?.for_middle_income ?? "";
-    if (tab === "upper_income")  return narrative?.for_upper_income ?? "";
-    return narrative?.for_small_business ?? "";
-  }
-
-  return (
-    <div>
-      {/* Tab row */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              "rounded-full border px-4 py-1.5 text-sm font-medium transition-all duration-150",
-              activeTab === t.key
-                ? "border-white/22 bg-white/10 text-white/90"
-                : "border-white/8 text-white/40 hover:text-white/65",
-            )}
-          >
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+              tab === t.key
+                ? "border-white/20 bg-white/10 text-white/90"
+                : "border-white/8 text-white/40 hover:text-white/60",
+            )}>
+            <span className="text-lg">{t.emoji}</span>
             {t.label}
           </button>
         ))}
       </div>
 
-      {/* Content — always rendered fresh from getContent() */}
-      <p className="mb-5 text-sm leading-7 text-white/65">
-        {getContent(activeTab)}
-      </p>
-
-      <div className="rounded-xl border border-amber-500/18 bg-amber-950/12 px-4 py-3">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-amber-400/65">
-          Key uncertainty
-        </div>
-        <p className="text-sm text-white/55">{narrative?.biggest_uncertainty ?? ""}</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Data Sources Summary ──────────────────────────────────────────────────────
-
-function DataSourcesSummary({ report }: { report: SynthesisReport }) {
-  const ds = report.data_sources;
-  if (!ds) return null;
-
-  const agentCalls = ds.agents_and_calls ?? [];
-  const totalCalls = ds.total_tool_calls ?? report.meta?.total_tool_calls ?? 0;
-  const totalSeries = ds.total_unique_data_series ?? 0;
-  const agentsCompleted = report.meta?.agents_completed?.length ?? agentCalls.length;
-
-  // Unique data sources from tool info
-  const sourceNames = ["FRED", "BLS", "Census", "BEA", "Semantic Scholar", "CBO", "Tavily"];
-
-  return (
-    <div className="rounded-2xl border border-white/10 bg-[var(--bg-surface)] p-4">
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Stats */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-emerald-400 font-semibold">{totalCalls}</span>
-          <span className="text-white/45">data calls</span>
-        </div>
-        <span className="text-white/15">|</span>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-blue-400 font-semibold">{agentsCompleted}</span>
-          <span className="text-white/45">agents</span>
-        </div>
-        <span className="text-white/15">|</span>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-purple-400 font-semibold">{totalSeries}</span>
-          <span className="text-white/45">unique data series</span>
-        </div>
-        <span className="text-white/15">|</span>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-amber-400 font-semibold">{report.meta?.pipeline_duration_seconds ?? 0}s</span>
-          <span className="text-white/45">pipeline time</span>
-        </div>
-
-        {/* Source badges */}
-        <div className="ml-auto flex flex-wrap gap-1.5">
-          {sourceNames.map(name => (
-            <span key={name} className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/40">
-              {name}
-            </span>
+      {activeProfiles.length === 0 ? (
+        <p className="text-xs text-white/35">No data</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {activeProfiles.map((p, i) => (
+            <ProfileCard key={i} profile={p} cardType={cardType} />
           ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-// ─── Actionable Steps ("What You Can Do") ────────────────────────────────────
+// ─── 7: Geographic impact (VISUAL ONLY) ────────────────────────────────────────
 
-function ActionableSteps({ report }: { report: SynthesisReport }) {
-  // Generate actionable steps from narrative context
-  const steps = generateActionableSteps(report);
-  if (steps.length === 0) return null;
+function GeographicImpact({ regions }: { regions: GeographicRegion[] | null | undefined }) {
+  const safe = safeArr(regions).filter(Boolean).slice(0, 4);
+  if (safe.length === 0) return <p className="text-xs text-white/35">No data</p>;
 
-  return (
-    <Card className="border-emerald-500/15 bg-emerald-950/5">
-      <SectionHeading
-        label="What you can do"
-        sub="Concrete next steps based on this analysis"
-      />
-      <div className="space-y-3">
-        {steps.map((step, i) => (
-          <div key={i} className="flex items-start gap-3 rounded-lg border border-emerald-500/15 bg-emerald-950/10 px-4 py-3">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-xs font-bold text-emerald-400">
-              {i + 1}
-            </div>
-            <div>
-              <p className="text-sm text-white/75 leading-relaxed">{step.action}</p>
-              {step.context && <p className="mt-1 text-xs text-white/35">{step.context}</p>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function generateActionableSteps(report: SynthesisReport): Array<{ action: string; context?: string }> {
-  const steps: Array<{ action: string; context?: string }> = [];
-  const policyType = report.policy?.type?.toLowerCase() ?? "";
-  const title = report.policy?.title?.toLowerCase() ?? "";
-
-  // Immigration / visa related
-  if (policyType.includes("immigration") || title.includes("visa") || title.includes("h1b") || title.includes("h-1b")) {
-    steps.push(
-      { action: "Check your visa category and expiration dates immediately", context: "Processing times may change as policy takes effect" },
-      { action: "Consult an immigration attorney for personalized guidance", context: "Policy details often differ significantly from headlines" },
-      { action: "Monitor USCIS bulletins and Federal Register updates monthly" },
-    );
-  }
-  // Student loan related
-  if (title.includes("student loan") || title.includes("forgive") || title.includes("debt")) {
-    steps.push(
-      { action: "Verify your loan servicer and outstanding balance on StudentAid.gov", context: "Eligibility criteria vary by program and loan type" },
-      { action: "Do not stop making payments unless officially instructed", context: "Missed payments during processing can still affect credit" },
-      { action: "File your FAFSA and income-driven repayment application proactively" },
-    );
-  }
-  // Tariff / trade related
-  if (policyType.includes("tariff") || policyType.includes("trade") || title.includes("tariff") || title.includes("import")) {
-    steps.push(
-      { action: "Audit your supply chain for exposure to affected imports", context: "Identify components sourced from tariff-targeted countries" },
-      { action: "Explore domestic or alternative-country suppliers now", context: "Switching costs increase once tariffs take effect" },
-      { action: "Review pricing strategy and communicate potential changes to customers" },
-    );
-  }
-  // Tax related
-  if (policyType.includes("tax") || title.includes("tax")) {
-    steps.push(
-      { action: "Review your exposure to affected sectors and adjust portfolio diversification", context: "Tax changes affect equity valuations before they affect earnings" },
-      { action: "Consult a tax professional about planning opportunities before the effective date" },
-      { action: "If you run a business: model the impact on your margins using the scenario ranges above" },
-    );
-  }
-
-  // Generic steps if none matched
-  if (steps.length === 0) {
-    steps.push(
-      { action: "Stay informed — bookmark official government sources for updates", context: "Policy details evolve significantly during implementation" },
-      { action: "Assess your personal exposure using the income-tier breakdowns above" },
-      { action: "Consider consulting a professional advisor for your specific situation" },
-    );
-  }
-
-  return steps;
-}
-
-// ─── Sticky Section Nav ──────────────────────────────────────────────────────
-
-const SECTION_NAV = [
-  { id: "overview", label: "Overview", n: 1 },
-  { id: "waterfall", label: "Money Flow", n: 2 },
-  { id: "categories", label: "Categories", n: 3 },
-  { id: "winners", label: "Winners", n: 4 },
-  { id: "geography", label: "Geography", n: 5 },
-  { id: "confidence", label: "Confidence", n: 6 },
-  { id: "actions", label: "Actions", n: 7 },
-];
-
-function SectionNav() {
-  const [active, setActive] = useState("overview");
-
-  const scrollTo = (id: string) => {
-    const el = document.getElementById(`section-${id}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-      setActive(id);
-    }
+  const getSeverityEmoji = (sev: string) => {
+    if (sev === "HIGH") return "🔴";
+    if (sev === "MEDIUM") return "🟡";
+    return "🟢";
   };
 
   return (
-    <nav className="hidden lg:flex fixed right-4 top-1/2 -translate-y-1/2 z-40 flex-col gap-2">
-      {SECTION_NAV.map((s) => (
-        <button
-          key={s.id}
-          onClick={() => scrollTo(s.id)}
-          className={cn(
-            "group flex items-center gap-2 transition-all",
-          )}
-        >
-          <span className={cn(
-            "h-2 w-2 rounded-full transition-all",
-            active === s.id ? "bg-amber-400 scale-125" : "bg-white/20 group-hover:bg-white/40",
-          )} />
-          <span className={cn(
-            "text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity",
-            active === s.id ? "text-amber-300" : "text-white/50",
-          )}>
-            {s.label}
-          </span>
-        </button>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {safe.map((r) => (
+        <div key={r.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-white/85">{shortText(r.name, 20)}</div>
+              <div className="text-xs text-white/40">{shortText(r.examples, 32)}</div>
+            </div>
+            <span className="text-xl">🗺️</span>
+          </div>
+
+          <div className="mb-3 rounded-lg bg-white/5 p-2">
+            <div className="text-xl font-bold" style={{ color: r.color || "#94a3b8" }}>
+              {r.net_monthly_range_median_hh}
+              <span className="ml-1 text-xs font-normal text-white/30">/mo</span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-white/50">Rent</span>
+              <span>{getSeverityEmoji(r.rent_impact_severity)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-white/50">Prices</span>
+              <span>{getSeverityEmoji(r.price_impact_severity)}</span>
+            </div>
+          </div>
+        </div>
       ))}
-    </nav>
+    </div>
   );
 }
 
-// ─── Main — page flow ─────────────────────────────────────────────────────────
+// ─── 8: Confidence assessment (SIMPLIFIED) ────────────────────────────────────
 
-export default function ResultsPanel({ report }: ResultsPanelProps) {
-  if (!report) return null;
+function ConfidenceRadar({ data }: { data: FullReport["confidence_assessment"] }) {
+  const components = safeArr(data?.by_component).filter(Boolean).slice(0, 5);
+  const scenarios = safeArr(data?.what_would_change_conclusion).slice(0, 3);
+
+  const confEmoji: Record<string, string> = {
+    HIGH: "✅", MEDIUM: "⚠️", LOW: "❓",
+  };
+
+  if (components.length === 0) return <p className="text-xs text-white/35">No data</p>;
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6">
-      {/* Sticky section nav dots */}
-      <SectionNav />
-
-      {/* Data sources summary banner */}
-      <DataSourcesSummary report={report} />
-
-      {/* ── Step 1: What is this policy? ── */}
-      <div id="section-overview">
-        <StepBadge n={1} label="Policy overview" />
-      </div>
-      <PolicyHeader report={report} />
-      <KpiStrip metrics={report.headline_metrics ?? []} />
-
-      {/* ── Step 2: Where does the money go? ── */}
-      {report.waterfall && (
-        <>
-          <div id="section-waterfall">
-            <StepBadge n={2} label="Where does the money go?" />
-          </div>
-          <Card>
-            <SectionHeading
-              label={report.waterfall?.title ?? "Household Budget Waterfall"}
-              sub="Every dollar of the transfer, traced through taxes, rent, and prices to your net monthly gain"
-            />
-            <WaterfallChart data={report.waterfall} />
-          </Card>
-        </>
+    <div className="space-y-2.5">
+      {data?.weakest_link && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-950/12 p-3">
+          <div className="mb-1 text-xs font-semibold text-amber-400">BIGGEST UNCERTAINTY</div>
+          <p className="text-xs text-white/60">{shortText(data.weakest_link, 80)}</p>
+        </div>
       )}
 
-      {/* ── Step 3: What gets more expensive? ── */}
-      <div id="section-categories">
-        <StepBadge n={3} label="What gets more expensive?" />
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <SectionHeading
-            label="Spending category impacts"
-            sub="How much each budget line rises — click any row for detail"
-          />
-          {report.category_breakdown?.categories && (
-            <CategoryChart categories={report.category_breakdown.categories} />
-          )}
-        </Card>
+      {components.map((c, i) => {
+        const emoji = confEmoji[safeStr(c.confidence).toUpperCase()] ?? "❓";
+        return (
+          <div key={i} className="flex items-center gap-3 rounded-lg border border-white/8 p-3">
+            <span className="text-lg">{emoji}</span>
+            <div className="flex-1">
+              <div className="text-sm font-medium text-white/75">{shortText(c.component, 30)}</div>
+              <div className="text-xs text-white/40">{shortText(c.reasoning, 50)}</div>
+            </div>
+            <ConfBadge c={c.confidence} />
+          </div>
+        );
+      })}
 
-        <Card>
-          <SectionHeading
-            label="When will you feel it?"
-            sub="Net monthly benefit over time as prices adjust"
-          />
-          {report.timeline?.phases && (
+      {scenarios.length > 0 && (
+        <div className="rounded-lg border border-white/8 bg-white/[0.02] p-3">
+          <div className="mb-2 text-xs font-semibold text-white/60">What would change this?</div>
+          <div className="space-y-1.5">
+            {scenarios.map((s, i) => (
+              <div key={i} className="flex gap-2 text-xs text-white/45">
+                <span className="mt-0.5 shrink-0">→</span>
+                {shortText(s, 70)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 9: Narrative (MINIMAL) ───────────────────────────────────────────────────
+
+type NarrativeTab = "low_income" | "middle_income" | "upper_income" | "small_business";
+
+const NARRATIVE_EMOJIS: Record<NarrativeTab, string> = {
+  low_income: "💰",
+  middle_income: "👨‍💼",
+  upper_income: "🏆",
+  small_business: "🏢",
+};
+
+function NarrativePanel({ narrative }: { narrative: FullReport["narrative"] }) {
+  const [activeTab, setActiveTab] = useState<NarrativeTab>("middle_income");
+
+  const tabs: { key: NarrativeTab; label: string }[] = [
+    { key: "low_income",     label: "Low income" },
+    { key: "middle_income",  label: "Middle income" },
+    { key: "upper_income",   label: "High income" },
+    { key: "small_business", label: "Business" },
+  ];
+
+  function getContent(tab: NarrativeTab): string {
+    if (tab === "low_income")    return safeStr(narrative?.for_low_income);
+    if (tab === "middle_income") return safeStr(narrative?.for_middle_income);
+    if (tab === "upper_income")  return safeStr(narrative?.for_upper_income);
+    return safeStr(narrative?.for_small_business);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {tabs.map((t) => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            className={cn(
+              "flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+              activeTab === t.key
+                ? "border-white/20 bg-white/10 text-white/90"
+                : "border-white/8 text-white/40 hover:text-white/60",
+            )}>
+            <span>{NARRATIVE_EMOJIS[t.key]}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-white/8 bg-white/[0.02] p-3">
+        <p className="text-sm leading-relaxed text-white/65">
+          {shortText(getContent(activeTab), 180)}
+        </p>
+      </div>
+
+      {narrative?.biggest_uncertainty && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-950/12 p-3">
+          <div className="mb-1 text-xs font-semibold text-amber-400">Key uncertainty</div>
+          <p className="text-xs text-white/50">{shortText(narrative.biggest_uncertainty, 100)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN LAYOUT (INFOGRAPHIC-FIRST) ────────────────────────────────────────
+
+export default function ResultsPanel({ report }: ResultsPanelProps) {
+  if (!report) {
+    return (
+      <section className="mx-auto w-full max-w-6xl px-4 py-12 text-center">
+        <p className="text-white/40">No report data available.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mx-auto w-full max-w-6xl space-y-4 px-4 py-6 sm:px-6">
+
+      {/* BANNER: Policy + Verdict */}
+      <PolicyHeader report={report} />
+
+      {/* KPI STRIP: 4 Headline metrics */}
+      <KpiStrip metrics={report.headline_metrics} />
+
+      {/* SANKEY FLOW (if available) */}
+      {report.sankey_data && <SankeyCard data={report.sankey_data} />}
+
+      {/* MAIN ANALYSIS GRID (2 columns) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* LEFT: Waterfall - Where does money go? */}
+        {report.waterfall && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">📊</span>
+              <h3 className="text-sm font-semibold text-white/85">Where does it go?</h3>
+            </div>
+            <WaterfallChart data={report.waterfall} />
+          </Card>
+        )}
+
+        {/* RIGHT: Timeline - When will you feel it? */}
+        {report.timeline?.phases && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">⏱️</span>
+              <h3 className="text-sm font-semibold text-white/85">Timeline of impact</h3>
+            </div>
             <TimelineChart
               phases={report.timeline.phases}
-              household_profile={report.timeline.household_profile}
+              household_profile={safeStr(report.timeline?.household_profile)}
             />
-          )}
-        </Card>
-      </div>
-
-      {/* ── Step 4: Who wins and who loses? ── */}
-      <div id="section-winners">
-        <StepBadge n={4} label="Who wins and who loses?" />
-      </div>
-      <Card>
-        <SectionHeading
-          label="Who benefits — who doesn't"
-          sub="Outcomes vary dramatically by income level, housing tenure, and geography"
-        />
-        {report.winners_losers && <WinnersLosers data={report.winners_losers} />}
-      </Card>
-
-      {/* ── Step 5: Does location matter? ── */}
-      <div id="section-geography">
-        <StepBadge n={5} label="Does location matter?" />
-      </div>
-      <Card>
-        <SectionHeading
-          label="Impact by region"
-          sub="High-cost cities absorb more of the UBI through rent. Low-cost areas keep more."
-        />
-        {report.geographic_impact?.regions && (
-          <GeographicImpact regions={report.geographic_impact.regions} />
+          </Card>
         )}
-      </Card>
-
-      {/* ── Step 6: How certain is this? ── */}
-      <div id="section-confidence">
-        <StepBadge n={6} label="How certain is this?" />
       </div>
+
+      {/* WHO WINS / LOSES */}
+      {report.winners_losers && (
+        <Card>
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-lg">👥</span>
+            <h3 className="text-sm font-semibold text-white/85">Who benefits? Who doesn't?</h3>
+          </div>
+          <WinnersLosers data={report.winners_losers} />
+        </Card>
+      )}
+
+      {/* SPENDING CATEGORIES + REGIONS (2 columns) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <SectionHeading
-            label="Confidence by component"
-            sub="Closer to the edge = higher confidence. Inner = more uncertain."
-          />
-          {report.confidence_assessment && (
+        {/* Spending impact */}
+        {report.category_breakdown?.categories && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">📈</span>
+              <h3 className="text-sm font-semibold text-white/85">What gets pricier?</h3>
+            </div>
+            <CategoryChart categories={report.category_breakdown.categories} />
+          </Card>
+        )}
+
+        {/* Geographic impact */}
+        {report.geographic_impact?.regions && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">🗺️</span>
+              <h3 className="text-sm font-semibold text-white/85">Regional differences</h3>
+            </div>
+            <GeographicImpact regions={report.geographic_impact.regions} />
+          </Card>
+        )}
+      </div>
+
+      {/* CONFIDENCE + NARRATIVE (2 columns) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {report.confidence_assessment && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">🎯</span>
+              <h3 className="text-sm font-semibold text-white/85">How confident?</h3>
+            </div>
             <ConfidenceRadar data={report.confidence_assessment} />
-          )}
-        </Card>
+          </Card>
+        )}
 
-        <Card>
-          <SectionHeading
-            label="What this means for you"
-            sub="Select your situation to see a plain-language summary"
-          />
-          {report.narrative && <NarrativePanel narrative={report.narrative} />}
-        </Card>
+        {report.narrative && (
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-lg">💡</span>
+              <h3 className="text-sm font-semibold text-white/85">What it means for you</h3>
+            </div>
+            <NarrativePanel narrative={report.narrative} />
+          </Card>
+        )}
       </div>
 
-      {/* ── Step 7: What you can do ── */}
-      <div id="section-actions">
-        <StepBadge n={7} label="What you can do about it" />
-      </div>
-      <ActionableSteps report={report} />
-
-      {/* Cost transparency footer */}
-      <footer className="rounded-2xl border border-white/8 bg-white/[0.02] px-5 py-4">
-        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-white/35">
-          <span>{report.meta?.total_tool_calls ?? 0} tool calls</span>
-          <span className="text-white/10">|</span>
-          <span>{report.meta?.agents_completed?.length ?? 0} agents completed</span>
-          <span className="text-white/10">|</span>
-          <span>{report.meta?.pipeline_duration_seconds ?? 0}s total</span>
-          <span className="text-white/10">|</span>
-          <span>{report.meta?.model_used ?? "LLM"}</span>
-        </div>
-        <div className="mt-2 text-center text-[11px] text-white/20">
-          Estimated cost: ~$0.12 (LLM) + 66 sats / ~$0.02 (Lightning) = <span className="text-white/40 font-medium">~$0.14 total</span>
-          <span className="mx-2 text-white/10">|</span>
-          All government data APIs: $0
-        </div>
+      {/* FOOTER: Meta */}
+      <footer className="flex justify-between px-2 text-xs text-white/20">
+        <span>
+          {safeNum(report.meta?.total_tool_calls)} calls · {safeArr(report.meta?.agents_completed).length} agents
+        </span>
+        <span>{safeNum(report.meta?.pipeline_duration_seconds)}s</span>
       </footer>
     </section>
   );
