@@ -1,0 +1,12 @@
+# Build Aperture from source — clone + build (has replace directives that break go install)
+
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache git make
+RUN git clone https://github.com/lightninglabs/aperture.git /aperture
+WORKDIR /aperture
+RUN go build -o /bin/aperture ./cmd/aperture
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /bin/aperture /usr/local/bin/aperture
+ENTRYPOINT ["aperture"]

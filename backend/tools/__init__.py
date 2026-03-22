@@ -10,6 +10,8 @@ from backend.tools.census_acs_query import census_acs_query
 from backend.tools.bea_regional_data import bea_regional_data
 from backend.tools.hud_data import hud_data
 from backend.tools.code_execute import code_execute
+from backend.tools.calculate_elasticity import calculate_elasticity
+from backend.tools.run_scenario_analysis import run_scenario_analysis
 
 __all__ = [
     "fred_search",
@@ -24,4 +26,6 @@ __all__ = [
     "bea_regional_data",
     "hud_data",
     "code_execute",
+    "calculate_elasticity",
+    "run_scenario_analysis",
 ]

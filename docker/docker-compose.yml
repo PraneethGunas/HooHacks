@@ -1,0 +1,50 @@
+# PolicyPulse — Docker Compose (Backend + Frontend only, no Lightning)
+#
+# Use this for development when you don't need the Lightning stack.
+# For full stack with Lightning payments: docker-compose.fullstack.yml
+#
+# Usage:
+#   cp .env.example .env   # fill in API keys
+#   docker compose -f docker/docker-compose.yml up --build
+
+# ── Shared env for backend ────────────────────────────────────
+x-backend-env: &backend-env
+  LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  FRED_API_KEY: ${FRED_API_KEY:-}
+  BLS_API_KEY: ${BLS_API_KEY:-}
+  BEA_API_KEY: ${BEA_API_KEY:-}
+  TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+  CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+  SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+
+services:
+
+  # ── Backend (FastAPI) ───────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: policypulse-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app/backend
+    environment:
+      <<: *backend-env
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+
+  # ── Frontend (Next.js) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: policypulse-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000

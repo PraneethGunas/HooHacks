@@ -1,3 +1,24 @@
+"""
+PolicyPulse backend configuration — loaded from environment variables.
+
+===========================================================================
+INTEGRATION GUIDE
+===========================================================================
+
+STATUS: 🟡 DEFAULTS ONLY — All API keys are empty strings.
+
+All settings can be overridden via environment variables or a .env file
+in the project root. Pydantic auto-maps env vars to field names
+(case-insensitive). Example .env:
+
+    OPENAI_API_KEY=sk-...
+    GOOGLE_API_KEY=AIza...
+    APERTURE_URL=http://aperture:8081
+
+OWNER: Everyone — each team member sets keys for their module.
+===========================================================================
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,24 +32,37 @@ _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = {"env_file": str(_ENV_PATH), "env_file_encoding": "utf-8"}
+    model_config = {"env_file": str(_ENV_PATH), "env_file_encoding": "utf-8", "extra": "ignore"}
 
-    # Data APIs
+    # --- LLM ---
+    openai_api_key: str = ""
+    google_api_key: str = ""
+    anthropic_api_key: str = ""
+
+    # --- Data APIs ---
     fred_api_key: str = Field("", description="FRED API key")
     bls_api_key: Optional[str] = Field(None, description="BLS API key (optional)")
+    bea_api_key: str = ""
+    bea_data_api: str = ""
     tavily_api_key: str = Field("", description="Tavily API key")
     semantic_scholar_key: Optional[str] = Field(None, description="Semantic Scholar API key (optional)")
     openalex_email: str = Field("policypulse@hoohacks.io", description="Email for OpenAlex polite pool")
     census_api_key: str = ""
-    bea_data_api: str = ""
     hud_data_api: str = ""
 
-    # LLM settings
+    # --- Lightning ---
+    aperture_url: str = "http://localhost:8081"
+    lnget_max_cost_sats: int = 500
+
+    # --- App ---
+    debug: bool = True
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    # --- LLM settings (agent pipeline) ---
     gemini_api_key: Optional[str] = Field(None, description="Google Gemini API key")
-    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
-    anthropic_api_key: Optional[str] = Field(None, description="Anthropic API key")
     llm_provider: str = Field("gemini", description="LLM provider: gemini, openai, or anthropic")
     llm_model_name: str = Field("gemini-2.5-flash", description="LLM model name")
+    classifier_model_name: str = Field("gemini-2.5-flash", description="Fast model for Stage 0 ADK Classifier")
 
 
 settings = Settings()
