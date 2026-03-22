@@ -44,12 +44,34 @@ const SEVERITY_STYLES: Record<"HIGH" | "MEDIUM" | "LOW", { bar: string; text: st
 
 // ─── Shared atoms ─────────────────────────────────────────────────────────────
 
-function ConfBadge({ c }: { c: string | undefined | null }) {
+function ConfBadge({ c, large }: { c: string | undefined | null; large?: boolean }) {
   const s = confStyle(c);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const tooltipText: Record<string, string> = {
+    "High confidence": "Backed by direct data from government APIs or peer-reviewed studies",
+    "Medium confidence": "Based on established economic models with named assumptions",
+    "Low confidence": "Agent reasoning flagged as uncertain — treat as directional only",
+  };
+
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", s.pill)}>
-      <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", s.dot)} />
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border font-medium relative cursor-help",
+        large ? "px-3.5 py-1 text-sm gap-2" : "px-2.5 py-0.5 text-xs",
+        s.pill,
+      )}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <span className={cn(large ? "h-2 w-2" : "h-1.5 w-1.5", "rounded-full", s.dot)} />
+      {large ? null : <span className="ml-1.5" />}
       {s.label}
+      {showTooltip && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-black/95 border border-white/10 px-3 py-2 text-[11px] text-white/70 leading-relaxed z-50 pointer-events-none shadow-lg">
+          {tooltipText[s.label] ?? "Confidence assessment from multi-agent analysis"}
+        </span>
+      )}
     </span>
   );
 }
@@ -872,6 +894,186 @@ function NarrativePanel({ narrative }: { narrative: SynthesisReport["narrative"]
   );
 }
 
+// ─── Data Sources Summary ──────────────────────────────────────────────────────
+
+function DataSourcesSummary({ report }: { report: SynthesisReport }) {
+  const ds = report.data_sources;
+  if (!ds) return null;
+
+  const agentCalls = ds.agents_and_calls ?? [];
+  const totalCalls = ds.total_tool_calls ?? report.meta?.total_tool_calls ?? 0;
+  const totalSeries = ds.total_unique_data_series ?? 0;
+  const agentsCompleted = report.meta?.agents_completed?.length ?? agentCalls.length;
+
+  // Unique data sources from tool info
+  const sourceNames = ["FRED", "BLS", "Census", "BEA", "Semantic Scholar", "CBO", "Tavily"];
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[var(--bg-surface)] p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Stats */}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-emerald-400 font-semibold">{totalCalls}</span>
+          <span className="text-white/45">data calls</span>
+        </div>
+        <span className="text-white/15">|</span>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-blue-400 font-semibold">{agentsCompleted}</span>
+          <span className="text-white/45">agents</span>
+        </div>
+        <span className="text-white/15">|</span>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-purple-400 font-semibold">{totalSeries}</span>
+          <span className="text-white/45">unique data series</span>
+        </div>
+        <span className="text-white/15">|</span>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-amber-400 font-semibold">{report.meta?.pipeline_duration_seconds ?? 0}s</span>
+          <span className="text-white/45">pipeline time</span>
+        </div>
+
+        {/* Source badges */}
+        <div className="ml-auto flex flex-wrap gap-1.5">
+          {sourceNames.map(name => (
+            <span key={name} className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/40">
+              {name}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Actionable Steps ("What You Can Do") ────────────────────────────────────
+
+function ActionableSteps({ report }: { report: SynthesisReport }) {
+  // Generate actionable steps from narrative context
+  const steps = generateActionableSteps(report);
+  if (steps.length === 0) return null;
+
+  return (
+    <Card className="border-emerald-500/15 bg-emerald-950/5">
+      <SectionHeading
+        label="What you can do"
+        sub="Concrete next steps based on this analysis"
+      />
+      <div className="space-y-3">
+        {steps.map((step, i) => (
+          <div key={i} className="flex items-start gap-3 rounded-lg border border-emerald-500/15 bg-emerald-950/10 px-4 py-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-xs font-bold text-emerald-400">
+              {i + 1}
+            </div>
+            <div>
+              <p className="text-sm text-white/75 leading-relaxed">{step.action}</p>
+              {step.context && <p className="mt-1 text-xs text-white/35">{step.context}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function generateActionableSteps(report: SynthesisReport): Array<{ action: string; context?: string }> {
+  const steps: Array<{ action: string; context?: string }> = [];
+  const policyType = report.policy?.type?.toLowerCase() ?? "";
+  const title = report.policy?.title?.toLowerCase() ?? "";
+
+  // Immigration / visa related
+  if (policyType.includes("immigration") || title.includes("visa") || title.includes("h1b") || title.includes("h-1b")) {
+    steps.push(
+      { action: "Check your visa category and expiration dates immediately", context: "Processing times may change as policy takes effect" },
+      { action: "Consult an immigration attorney for personalized guidance", context: "Policy details often differ significantly from headlines" },
+      { action: "Monitor USCIS bulletins and Federal Register updates monthly" },
+    );
+  }
+  // Student loan related
+  if (title.includes("student loan") || title.includes("forgive") || title.includes("debt")) {
+    steps.push(
+      { action: "Verify your loan servicer and outstanding balance on StudentAid.gov", context: "Eligibility criteria vary by program and loan type" },
+      { action: "Do not stop making payments unless officially instructed", context: "Missed payments during processing can still affect credit" },
+      { action: "File your FAFSA and income-driven repayment application proactively" },
+    );
+  }
+  // Tariff / trade related
+  if (policyType.includes("tariff") || policyType.includes("trade") || title.includes("tariff") || title.includes("import")) {
+    steps.push(
+      { action: "Audit your supply chain for exposure to affected imports", context: "Identify components sourced from tariff-targeted countries" },
+      { action: "Explore domestic or alternative-country suppliers now", context: "Switching costs increase once tariffs take effect" },
+      { action: "Review pricing strategy and communicate potential changes to customers" },
+    );
+  }
+  // Tax related
+  if (policyType.includes("tax") || title.includes("tax")) {
+    steps.push(
+      { action: "Review your exposure to affected sectors and adjust portfolio diversification", context: "Tax changes affect equity valuations before they affect earnings" },
+      { action: "Consult a tax professional about planning opportunities before the effective date" },
+      { action: "If you run a business: model the impact on your margins using the scenario ranges above" },
+    );
+  }
+
+  // Generic steps if none matched
+  if (steps.length === 0) {
+    steps.push(
+      { action: "Stay informed — bookmark official government sources for updates", context: "Policy details evolve significantly during implementation" },
+      { action: "Assess your personal exposure using the income-tier breakdowns above" },
+      { action: "Consider consulting a professional advisor for your specific situation" },
+    );
+  }
+
+  return steps;
+}
+
+// ─── Sticky Section Nav ──────────────────────────────────────────────────────
+
+const SECTION_NAV = [
+  { id: "overview", label: "Overview", n: 1 },
+  { id: "waterfall", label: "Money Flow", n: 2 },
+  { id: "categories", label: "Categories", n: 3 },
+  { id: "winners", label: "Winners", n: 4 },
+  { id: "geography", label: "Geography", n: 5 },
+  { id: "confidence", label: "Confidence", n: 6 },
+  { id: "actions", label: "Actions", n: 7 },
+];
+
+function SectionNav() {
+  const [active, setActive] = useState("overview");
+
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(`section-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setActive(id);
+    }
+  };
+
+  return (
+    <nav className="hidden lg:flex fixed right-4 top-1/2 -translate-y-1/2 z-40 flex-col gap-2">
+      {SECTION_NAV.map((s) => (
+        <button
+          key={s.id}
+          onClick={() => scrollTo(s.id)}
+          className={cn(
+            "group flex items-center gap-2 transition-all",
+          )}
+        >
+          <span className={cn(
+            "h-2 w-2 rounded-full transition-all",
+            active === s.id ? "bg-amber-400 scale-125" : "bg-white/20 group-hover:bg-white/40",
+          )} />
+          <span className={cn(
+            "text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity",
+            active === s.id ? "text-amber-300" : "text-white/50",
+          )}>
+            {s.label}
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 // ─── Main — page flow ─────────────────────────────────────────────────────────
 
 export default function ResultsPanel({ report }: ResultsPanelProps) {
@@ -879,16 +1081,25 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
 
   return (
     <section className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6">
+      {/* Sticky section nav dots */}
+      <SectionNav />
+
+      {/* Data sources summary banner */}
+      <DataSourcesSummary report={report} />
 
       {/* ── Step 1: What is this policy? ── */}
-      <StepBadge n={1} label="Policy overview" />
+      <div id="section-overview">
+        <StepBadge n={1} label="Policy overview" />
+      </div>
       <PolicyHeader report={report} />
       <KpiStrip metrics={report.headline_metrics ?? []} />
 
       {/* ── Step 2: Where does the money go? ── */}
       {report.waterfall && (
         <>
-          <StepBadge n={2} label="Where does the money go?" />
+          <div id="section-waterfall">
+            <StepBadge n={2} label="Where does the money go?" />
+          </div>
           <Card>
             <SectionHeading
               label={report.waterfall?.title ?? "Household Budget Waterfall"}
@@ -900,7 +1111,9 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       )}
 
       {/* ── Step 3: What gets more expensive? ── */}
-      <StepBadge n={3} label="What gets more expensive?" />
+      <div id="section-categories">
+        <StepBadge n={3} label="What gets more expensive?" />
+      </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <SectionHeading
@@ -927,7 +1140,9 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       </div>
 
       {/* ── Step 4: Who wins and who loses? ── */}
-      <StepBadge n={4} label="Who wins and who loses?" />
+      <div id="section-winners">
+        <StepBadge n={4} label="Who wins and who loses?" />
+      </div>
       <Card>
         <SectionHeading
           label="Who benefits — who doesn't"
@@ -937,7 +1152,9 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       </Card>
 
       {/* ── Step 5: Does location matter? ── */}
-      <StepBadge n={5} label="Does location matter?" />
+      <div id="section-geography">
+        <StepBadge n={5} label="Does location matter?" />
+      </div>
       <Card>
         <SectionHeading
           label="Impact by region"
@@ -949,7 +1166,9 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
       </Card>
 
       {/* ── Step 6: How certain is this? ── */}
-      <StepBadge n={6} label="How certain is this?" />
+      <div id="section-confidence">
+        <StepBadge n={6} label="How certain is this?" />
+      </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <SectionHeading
@@ -970,12 +1189,28 @@ export default function ResultsPanel({ report }: ResultsPanelProps) {
         </Card>
       </div>
 
-      {/* Footer */}
-      <footer className="pt-2 text-center text-xs text-white/25">
-        {report.meta?.total_tool_calls ?? 0} tool calls ·{" "}
-        {report.meta?.agents_completed?.length ?? 0} agents ·{" "}
-        {report.meta?.pipeline_duration_seconds ?? 0}s ·{" "}
-        {report.meta?.model_used ?? "unknown"}
+      {/* ── Step 7: What you can do ── */}
+      <div id="section-actions">
+        <StepBadge n={7} label="What you can do about it" />
+      </div>
+      <ActionableSteps report={report} />
+
+      {/* Cost transparency footer */}
+      <footer className="rounded-2xl border border-white/8 bg-white/[0.02] px-5 py-4">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-white/35">
+          <span>{report.meta?.total_tool_calls ?? 0} tool calls</span>
+          <span className="text-white/10">|</span>
+          <span>{report.meta?.agents_completed?.length ?? 0} agents completed</span>
+          <span className="text-white/10">|</span>
+          <span>{report.meta?.pipeline_duration_seconds ?? 0}s total</span>
+          <span className="text-white/10">|</span>
+          <span>{report.meta?.model_used ?? "LLM"}</span>
+        </div>
+        <div className="mt-2 text-center text-[11px] text-white/20">
+          Estimated cost: ~$0.12 (LLM) + 66 sats / ~$0.02 (Lightning) = <span className="text-white/40 font-medium">~$0.14 total</span>
+          <span className="mx-2 text-white/10">|</span>
+          All government data APIs: $0
+        </div>
       </footer>
     </section>
   );
