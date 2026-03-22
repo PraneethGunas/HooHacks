@@ -926,6 +926,15 @@ function buildSectorToolCalls(): Array<{ delayMs: number; event: PipelineEvent }
 export function buildMockTimeline(query: string): TimedPipelineEvent[] {
   const events: TimedPipelineEvent[] = [];
 
+  // Classifier thinking events
+  events.push({ delayMs: 100, event: mkEvent("classifier_thinking", { step_type: "phase_start", content: "Analyzing policy query and extracting structured parameters", phase: "1" }) });
+  events.push({ delayMs: 180, event: mkEvent("classifier_thinking", { step_type: "reasoning", content: `Input query: "${query}"`, phase: "1" }) });
+  events.push({ delayMs: 250, event: mkEvent("classifier_thinking", { step_type: "tool_call", content: "Invoking Google ADK classifier (Gemini Flash)", phase: "1", tool: "google_adk" }) });
+  events.push({ delayMs: 380, event: mkEvent("classifier_thinking", { step_type: "tool_result", content: "ADK classification: policy_proposal (confidence: high)", phase: "1", tool: "google_adk" }) });
+  events.push({ delayMs: 420, event: mkEvent("classifier_thinking", { step_type: "reasoning", content: "Identified policy type: policy_proposal", phase: "2" }) });
+  events.push({ delayMs: 430, event: mkEvent("classifier_thinking", { step_type: "reasoning", content: "Extracted parameters: policy_action=Corporate tax increase, scope=Federal, threshold=>$50B revenue", phase: "2" }) });
+  events.push({ delayMs: 440, event: mkEvent("classifier_thinking", { step_type: "phase_complete", content: "Classification complete — routing to Analyst Agent", phase: "2" }) });
+
   events.push({
     delayMs: 450,
     event: mkEvent("classifier_complete", {
