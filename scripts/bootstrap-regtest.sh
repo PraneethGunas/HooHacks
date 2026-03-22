@@ -60,6 +60,19 @@ echo -n "  bitcoind: "
 until $BITCOIN_CLI getblockchaininfo > /dev/null 2>&1; do sleep 1; done
 echo "ready"
 
+# Mine a few initial blocks so litd wallet backend can sync.
+# Without blocks, litd gets "Block height out of range" and never syncs.
+echo "  Mining 1 initial block for litd wallet sync..."
+INIT_ADDR=$($BITCOIN_CLI getnewaddress 2>/dev/null || echo "")
+if [ -n "$INIT_ADDR" ]; then
+    $BITCOIN_CLI generatetoaddress 1 "$INIT_ADDR" > /dev/null
+else
+    $BITCOIN_CLI createwallet "init" > /dev/null 2>&1 || true
+    INIT_ADDR=$($BITCOIN_CLI getnewaddress)
+    $BITCOIN_CLI generatetoaddress 1 "$INIT_ADDR" > /dev/null
+fi
+sleep 2
+
 echo -n "  litd-buyer: "
 until $LNCLI_BUYER getinfo > /dev/null 2>&1; do sleep 1; done
 echo "ready"
