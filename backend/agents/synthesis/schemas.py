@@ -147,43 +147,109 @@ class DataSourceSummary(BaseModel):
     tool_calls: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Reasoning Chain — shows HOW the system arrived at its conclusions
+# ---------------------------------------------------------------------------
+
+class PolicyClassification(BaseModel):
+    """Phase 0 classification that drove the entire analysis."""
+    policy_type: str = ""               # LABOR_COST, REGULATORY_COST, etc.
+    income_effect_exists: bool | None = None
+    income_effect_explanation: str = ""
+    analysis_mode: str = ""             # BILATERAL or PURE_COST
+    reasoning: str = ""                 # Why this classification
+
+
+class ChannelDecision(BaseModel):
+    """A single transmission channel and whether it was activated or gated out."""
+    name: str = ""
+    status: str = ""                    # ACTIVE, SECONDARY, NULL
+    reason: str = ""                    # Why this status
+    magnitude: str = ""                 # Central estimate if ACTIVE
+    confidence: str = ""
+    downstream_instruction: str = ""    # What sector agents were told
+
+
+class AgentFrameworkTrace(BaseModel):
+    """How a single agent applied its domain-specific framework."""
+    agent_name: str = ""
+    framework_name: str = ""            # e.g., "Stock-Flow-Price", "Price Transmission Pipeline"
+    mode: str = ""                      # e.g., "Mode B (Pure Cost)", "Full Analysis"
+    pathways_activated: list[str] = Field(default_factory=list)
+    pathways_skipped: list[str] = Field(default_factory=list)
+    skip_reasons: list[str] = Field(default_factory=list)
+    key_finding: str = ""              # One-sentence headline from this agent
+    key_data_used: list[str] = Field(default_factory=list)    # e.g., "FRED:HOUST (1,487K starts)"
+    key_elasticities: list[str] = Field(default_factory=list)  # e.g., "Rent elasticity: 0.5 (tight market)"
+    materiality_check: str = ""         # e.g., "Impact >$50/mo — full analysis" or "Impact <$8/mo — negligible"
+    tool_calls: int = 0
+    phases_completed: int = 0
+
+
+class ReasoningChain(BaseModel):
+    """The complete reasoning chain — shows HOW the system arrived at its conclusions."""
+    # Step 1: Classification
+    classification: PolicyClassification | None = None
+    # Step 2: Channel map
+    channel_decisions: list[ChannelDecision] = Field(default_factory=list)
+    active_channels: int = 0
+    null_channels: int = 0
+    # Step 3: Per-agent framework trace
+    agent_traces: list[AgentFrameworkTrace] = Field(default_factory=list)
+    # Step 4: Consistency resolutions
+    consistency_resolutions: list[str] = Field(default_factory=list)
+    phantom_channels_detected: list[str] = Field(default_factory=list)
+    # Step 5: The logic chain in plain English
+    reasoning_summary: str = ""         # 3-4 sentences: "The analyst classified this as X → told agents Y → housing found Z → consumer found W → synthesis computed Q"
+
+
+class DataProvenance(BaseModel):
+    """Traces a specific finding back to its source data."""
+    finding: str = ""                   # e.g., "+$127/month rent increase in tight markets"
+    data_sources: list[str] = Field(default_factory=list)  # e.g., ["FRED:MORTGAGE30US (6.9%)", "Census ACS B25064 ($1,295 median rent)"]
+    methodology: str = ""               # e.g., "Income elasticity 0.5 × 10% income shock × $1,295 baseline"
+    computed_by: str = ""               # e.g., "Housing Agent Phase 3 via code_execute"
+    confidence: str = ""
+
+
 class SynthesisReport(BaseModel):
-    """The final output — unified analysis payload for the frontend."""
-    # Policy context
+    """The final output — unified analysis payload for the frontend.
+
+    Three layers:
+    - Layer 1 (headline): Bottom line numbers for quick consumption
+    - Layer 2 (reasoning): HOW the system arrived at these numbers
+    - Layer 3 (deep dive): Per-agent framework traces and data provenance
+    """
+    # ── LAYER 1: HEADLINE ──────────────────────────────────────────
     policy_title: str = ""
     policy_one_liner: str = ""
 
-    # Headline metrics
     headline_metrics: list[HeadlineMetric] = Field(default_factory=list)
-
-    # Household impact matrix
     household_impacts: list[HouseholdImpact] = Field(default_factory=list)
-
-    # Waterfall chart data
     waterfall: WaterfallData | None = None
-
-    # Winners and losers
     winners_losers: WinnersLosersOutput | None = None
-
-    # Geographic impact
     geographic_impacts: list[GeographicImpact] = Field(default_factory=list)
-
-    # Timeline
     timeline: list[TimelineHorizon] = Field(default_factory=list)
 
-    # Consistency report
-    consistency_audit: ConsistencyAuditOutput | None = None
-
-    # Confidence
     overall_confidence: str = ""
     strongest_component: str = ""
     weakest_component: str = ""
 
-    # Narrative
     narrative: NarrativeOutput | None = None
 
-    # Data sources
+    # ── LAYER 2: REASONING CHAIN ───────────────────────────────────
+    reasoning_chain: ReasoningChain | None = None
+
+    # ── LAYER 3: DEEP DIVE ─────────────────────────────────────────
+    data_provenance: list[DataProvenance] = Field(default_factory=list)
     data_sources: list[DataSourceSummary] = Field(default_factory=list)
+    consistency_audit: ConsistencyAuditOutput | None = None
+
+    # ── META ───────────────────────────────────────────────────────
+    analysis_mode: str = ""             # BILATERAL or PURE_COST
+    total_tool_calls: int = 0
+    total_phases_completed: int = 0
+    agents_that_ran: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
