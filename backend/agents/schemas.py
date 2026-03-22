@@ -97,7 +97,7 @@ class TransmissionChannel(BaseModel):
     who_affected: list[str] = Field(default_factory=list)
     direction: str = ""
     magnitude_estimate: str = ""
-    confidence: str = "theoretical"
+    confidence: str = "THEORETICAL"
     empirically_studied: bool = False
     notes: str = ""
 
@@ -122,7 +122,7 @@ class EvidenceItem(BaseModel):
     effect_size: str = ""
     study_context: str = ""
     applicability: str = ""
-    confidence: str = "theoretical"
+    confidence: str = "THEORETICAL"
     url: str = ""
 
 

@@ -1,5 +1,5 @@
 """
-Stage 3: Synthesis Agent — aggregates sector reports into the final report + Sankey data.
+Stage 4: Synthesis Agent — aggregates sector reports + debate results into the final report + Sankey data.
 
 No external tool calls. Works purely on the outputs of previous stages.
 
@@ -23,7 +23,9 @@ from backend.models.pipeline import (
     SynthesisReport,
     PolicySummary,
     AgreedFinding,
+    ChallengeOutcome,
     Disagreement,
+    RebuttalResponse,
     UnifiedImpact,
     SankeyData,
     SankeyNode,
@@ -80,6 +82,18 @@ def _build_synthesis_context(state: PipelineState) -> str:
         if report.dissent:
             parts.append(f"  [DISSENT] {report.dissent}")
 
+    # Include debate results if available
+    if hasattr(state, "rebuttals") and state.rebuttals:
+        parts.append("\n=== DEBATE RESULTS ===")
+        for rb in state.rebuttals:
+            parts.append(f"\n  Challenge to {rb.challenge.target_agent}: {rb.challenge.target_claim.claim}")
+            parts.append(f"    Type: {rb.challenge.challenge_type.value}")
+            parts.append(f"    Response: {rb.response.value}")
+            if rb.revised_claim:
+                parts.append(f"    Revised claim: {rb.revised_claim.claim}")
+            if rb.new_evidence:
+                parts.append(f"    New evidence: {', '.join(rb.new_evidence[:3])}")
+
     return "\n".join(parts)[:8000]
 
 
@@ -134,12 +148,14 @@ def _build_sankey_data(state: PipelineState, llm_flows: list[dict] | None = None
 
 
 async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineState:
-    """Stage 3: Synthesize all results into the final report."""
+    """Stage 4: Synthesize all results into the final report."""
+    challenges_issued = len(state.challenges) if hasattr(state, "challenges") else 0
     await emit({
         "type": "agent_start",
         "agent": "synthesis",
         "data": {
             "sectors_analyzed": len(state.sector_reports),
+            "challenges_issued": challenges_issued,
         },
     })
 
@@ -213,7 +229,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         ),
         agreed_findings=agreed,
         disagreements=disagreements,
-        challenge_survival=[],
+        challenge_survival=challenge_survival,
         unified_impact=unified,
         sankey_data=sankey,
         sector_reports=state.sector_reports,
@@ -250,9 +266,9 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
             "sub": "with direct data",
         },
         {
-            "label": "Data Sources",
-            "value": str(len(state.tool_calls)),
-            "sub": "APIs queried",
+            "label": "Challenges Survived",
+            "value": str(sum(1 for cs in challenge_survival if cs.survived)),
+            "sub": f"of {len(challenge_survival)} issued",
         },
     ]
 
@@ -270,8 +286,25 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "key_claims": all_direct_effects,
     }
 
+    # Build challenge_survival from debate results
+    challenge_survival = []
+    challenge_survival_reshaped = []
+    if hasattr(state, "rebuttals") and state.rebuttals:
+        for rb in state.rebuttals:
+            survived = rb.response != RebuttalResponse.CONCEDE
+            challenge_survival.append(ChallengeOutcome(
+                challenge=rb.challenge,
+                rebuttal=rb,
+                survived=survived,
+            ))
+            challenge_survival_reshaped.append({
+                "challenge": rb.challenge.model_dump(),
+                "outcome": rb.response.value,
+                "final_claim": (rb.revised_claim or rb.original_claim).model_dump(),
+            })
+
     # Estimate total_llm_calls from stage count (rough estimate)
-    total_llm_calls = 1 + 1 + 4 + 1  # classifier + analyst + 4 sectors + synthesis
+    total_llm_calls = 1 + 1 + 4 + 2 + 1  # classifier + analyst + 4 sectors + debate (2 calls) + synthesis
 
     # Compute total duration from stage_times
     duration_ms = int(sum(state.stage_times.values()) * 1000) if state.stage_times else 0
@@ -343,7 +376,7 @@ async def run_synthesis(state: PipelineState, emit: EventCallback) -> PipelineSt
         "sankey_data": sankey.model_dump(),
         "disagreements": [d.model_dump() for d in disagreements],
         "agreed_findings": agreed_findings_reshaped,
-        "challenge_survival": [],
+        "challenge_survival": challenge_survival_reshaped,
         "metadata": metadata,
     }
 

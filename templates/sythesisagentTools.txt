@@ -1,0 +1,474 @@
+# Synthesis & Impact Dashboard Agent — Tool Inventory
+
+## The Key Insight: This Agent Has Almost No External Tools
+
+The Synthesis Agent is fundamentally different from every other agent
+in the pipeline. The Policy Analyst and sector agents are DATA
+GATHERERS — they call FRED, BLS, Census, OpenAlex, etc. The Synthesis
+Agent is a DATA INTEGRATOR — it works exclusively with the outputs
+already produced by upstream agents.
+
+This means: no FRED, no BLS, no academic search, no web search.
+
+The Synthesis Agent's "tools" are internal computation and structuring
+capabilities, not external API calls. It receives structured JSON
+from each upstream agent and produces structured JSON for the frontend.
+
+---
+
+## Input Sources (Not Tools — Provided by Orchestrator)
+
+These are the structured outputs injected into the Synthesis Agent's
+context by the orchestrator. They are the agent's ONLY information
+sources.
+
+### Input 1: Policy Analyst Briefing
+
+**Contains:**
+- Policy specification (action, value, scope, timeline, exemptions)
+- Baseline economic data (key metrics with FRED/BLS series IDs)
+- Transmission channel map (11+ channels with direction, magnitude, confidence)
+- Sector exposure matrix (industry × exposure level × primary channels)
+- Evidence base (studies, CBO reports, analogous cases)
+- Uncertainty and sensitivity factors
+- Scenarios (optimistic, central, pessimistic)
+
+**Used for:**
+- Framing the overall policy context
+- Extracting the direct policy transfer amount (if any)
+- Understanding which channels are HIGH vs LOW confidence
+- Tax/fiscal implications for income-side calculations
+
+### Input 2: Labor Agent Output
+
+**Contains:**
+- Workforce exposure analysis (number of affected workers, by occupation/region)
+- Wage change estimates (percentage and dollar, by tier)
+- Employment change estimates (headcount and hours)
+- Benefits cliff analysis (lost benefits at income thresholds)
+- Automation/substitution risk assessment
+
+**Used for:**
+- Income side of the household balance sheet
+- Employment probability adjustment
+- Benefits cliff deduction
+- Providing the AUTHORITATIVE wage estimate (overrides other agents' assumptions)
+
+### Input 3: Consumer Agent Output
+
+**Contains:**
+- Price change by expenditure category (groceries, restaurants, transport, etc.)
+- Pass-through rates by category
+- Budget impact by income tier
+- Consumer impact scorecard (by geography and income)
+- Net purchasing power calculation (Consumer's partial version)
+
+**Used for:**
+- Cost side of the household balance sheet (non-housing categories)
+- Budget share weights by income tier
+- Geographic price variation adjustment
+- The AUTHORITATIVE price estimate (overrides other agents' assumptions)
+
+### Input 4: Housing Agent Output
+
+**Contains:**
+- Pathway analysis (A through F with direction and magnitude)
+- Rent change estimates (low/central/high, by market type)
+- Home price / mortgage payment changes
+- Affordability scorecard (by region and income)
+- Temporal phasing of housing effects
+- Nominal vs real analysis
+
+**Used for:**
+- Housing cost line in the household balance sheet
+- Mortgage payment change for homeowner profiles
+- Geographic market tightness context
+- Temporal phasing (housing effects are slowest)
+- The AUTHORITATIVE housing cost estimate (overrides other agents)
+
+### Input 5: Business Agent Output
+
+**Contains:**
+- Operating cost changes by industry
+- Margin impact by firm size
+- Business formation/closure estimates
+- Compliance cost estimates
+- Revenue impact from consumer spending shifts
+
+**Used for:**
+- Business income line for self-employed household profiles
+- Context on which industries face pressure (affects job security)
+- Small business viability assessment
+
+---
+
+## Tool 1: compute_net_impact (Internal Computation)
+
+**What it is:** A structured computation function that takes resolved
+values from all upstream agents and computes the net household impact
+for a specific household profile.
+
+**This is NOT an external API call.** It's a computation the LLM
+performs using the data it has in context. However, for reliability
+and auditability, the orchestrator can implement this as a code
+execution tool that the LLM calls with structured inputs.
+
+**Parameters:**
+
+```python
+def compute_net_impact(
+    # Income side
+    direct_transfer_monthly: float,       # e.g., $1000 for UBI
+    effective_tax_rate: float,            # e.g., 0.22 for 22%
+    wage_change_pct: float,              # from Labor Agent
+    current_monthly_wage: float,          # from household profile
+    employment_probability_change: float, # from Labor (e.g., -0.02 = 2% chance of job loss)
+    benefits_cliff_loss_monthly: float,   # from Labor (lost SNAP/Medicaid etc)
+    business_income_change_monthly: float, # from Business (if self-employed)
+    
+    # Cost side (all from Consumer + Housing)
+    grocery_price_change_pct: float,
+    restaurant_price_change_pct: float,
+    transport_price_change_pct: float,
+    healthcare_price_change_pct: float,
+    childcare_price_change_pct: float,
+    retail_price_change_pct: float,
+    other_services_price_change_pct: float,
+    rent_change_monthly: float,           # from Housing (dollar amount)
+    mortgage_payment_change_monthly: float, # from Housing (dollar amount)
+    utility_change_monthly: float,        # from Housing or Consumer
+    
+    # Household profile
+    monthly_income: float,
+    budget_shares: dict,  # {"groceries": 0.11, "restaurants": 0.04, ...}
+    tenure: str,          # "renter" or "owner"
+    has_children: bool,
+    is_self_employed: bool,
+) -> dict:
+    """Compute net monthly impact for a specific household profile."""
+    
+    # Income changes
+    transfer_after_tax = direct_transfer_monthly * (1 - effective_tax_rate)
+    wage_change_dollar = current_monthly_wage * wage_change_pct
+    wage_after_tax = wage_change_dollar * (1 - effective_tax_rate)
+    employment_adj = employment_probability_change * monthly_income
+    
+    total_income_change = (
+        transfer_after_tax 
+        + wage_after_tax 
+        + employment_adj 
+        - benefits_cliff_loss_monthly
+        + (business_income_change_monthly if is_self_employed else 0)
+    )
+    
+    # Cost changes (price change % × monthly spend in that category)
+    cost_changes = {
+        "groceries": grocery_price_change_pct * monthly_income * budget_shares.get("groceries", 0),
+        "restaurants": restaurant_price_change_pct * monthly_income * budget_shares.get("restaurants", 0),
+        "transport": transport_price_change_pct * monthly_income * budget_shares.get("transport", 0),
+        "healthcare": healthcare_price_change_pct * monthly_income * budget_shares.get("healthcare", 0),
+        "childcare": (childcare_price_change_pct * monthly_income * budget_shares.get("childcare", 0)) if has_children else 0,
+        "retail": retail_price_change_pct * monthly_income * budget_shares.get("retail", 0),
+        "other": other_services_price_change_pct * monthly_income * budget_shares.get("other", 0),
+        "rent": rent_change_monthly if tenure == "renter" else 0,
+        "mortgage": mortgage_payment_change_monthly if tenure == "owner" else 0,
+        "utilities": utility_change_monthly,
+    }
+    
+    total_cost_change = sum(cost_changes.values())
+    
+    net_monthly = total_income_change - total_cost_change
+    
+    return {
+        "income_change_monthly": round(total_income_change, 2),
+        "cost_change_monthly": round(total_cost_change, 2),
+        "net_monthly": round(net_monthly, 2),
+        "net_annual": round(net_monthly * 12, 2),
+        "pct_of_income": round((net_monthly * 12) / (monthly_income * 12) * 100, 2),
+        "income_breakdown": {
+            "transfer_after_tax": round(transfer_after_tax, 2),
+            "wage_change_after_tax": round(wage_after_tax, 2),
+            "employment_adjustment": round(employment_adj, 2),
+            "benefits_cliff_loss": round(-benefits_cliff_loss_monthly, 2),
+            "business_income_change": round(business_income_change_monthly if is_self_employed else 0, 2),
+        },
+        "cost_breakdown": {k: round(v, 2) for k, v in cost_changes.items()},
+        "verdict": "better_off" if net_monthly > 50 else ("worse_off" if net_monthly < -50 else "roughly_neutral"),
+    }
+```
+
+**Why implement this as a callable tool rather than LLM arithmetic:**
+LLMs make arithmetic errors, especially with many variables. A code
+execution tool guarantees correct computation. The LLM's job is to
+select the right inputs (resolved values from Layer 2) and interpret
+the outputs — not to do the multiplication.
+
+**Cost:** Free (runs locally)
+
+---
+
+## Tool 2: validate_consistency (Internal Computation)
+
+**What it is:** A function that takes key shared variables from
+multiple agent outputs and identifies inconsistencies.
+
+```python
+def validate_consistency(
+    labor_wage_change_pct: float | None,
+    consumer_assumed_wage_change_pct: float | None,
+    housing_assumed_income_change_pct: float | None,
+    
+    housing_rent_change_monthly: float | None,
+    consumer_assumed_rent_change_monthly: float | None,
+    
+    consumer_inflation_estimate_pct: float | None,
+    housing_assumed_inflation_pct: float | None,
+    
+    labor_employment_change_pct: float | None,
+    business_assumed_labor_availability: str | None,
+) -> dict:
+    """Detect inconsistencies between agent outputs."""
+    
+    inconsistencies = []
+    resolutions = []
+    
+    # Check wage/income consistency
+    if labor_wage_change_pct is not None and housing_assumed_income_change_pct is not None:
+        if abs(labor_wage_change_pct - housing_assumed_income_change_pct) / max(abs(labor_wage_change_pct), 0.01) > 0.15:
+            inconsistencies.append({
+                "variable": "Income/wage change",
+                "labor_value": labor_wage_change_pct,
+                "housing_value": housing_assumed_income_change_pct,
+                "difference_pct": abs(labor_wage_change_pct - housing_assumed_income_change_pct),
+                "severity": "MATERIAL",
+                "resolution": "Use Labor Agent estimate (specialist)",
+                "resolved_value": labor_wage_change_pct,
+            })
+    
+    # Check rent consistency
+    if housing_rent_change_monthly is not None and consumer_assumed_rent_change_monthly is not None:
+        if abs(housing_rent_change_monthly - consumer_assumed_rent_change_monthly) > 20:
+            inconsistencies.append({
+                "variable": "Monthly rent change",
+                "housing_value": housing_rent_change_monthly,
+                "consumer_value": consumer_assumed_rent_change_monthly,
+                "difference_dollar": abs(housing_rent_change_monthly - consumer_assumed_rent_change_monthly),
+                "severity": "MATERIAL",
+                "resolution": "Use Housing Agent estimate (specialist)",
+                "resolved_value": housing_rent_change_monthly,
+            })
+    
+    # ... similar checks for inflation, employment, etc.
+    
+    return {
+        "inconsistencies_found": len(inconsistencies),
+        "material_inconsistencies": [i for i in inconsistencies if i["severity"] == "MATERIAL"],
+        "minor_inconsistencies": [i for i in inconsistencies if i["severity"] == "MINOR"],
+        "all_details": inconsistencies,
+    }
+```
+
+**Cost:** Free (runs locally)
+
+---
+
+## Tool 3: generate_waterfall_data (Internal Computation)
+
+**What it is:** Takes the output of compute_net_impact and structures
+it into the waterfall chart format the frontend needs.
+
+```python
+def generate_waterfall_data(
+    net_impact_result: dict,
+    household_label: str,
+    policy_label: str,
+) -> dict:
+    """Structure net impact data for waterfall chart rendering."""
+    
+    income = net_impact_result["income_breakdown"]
+    costs = net_impact_result["cost_breakdown"]
+    
+    steps = []
+    
+    # Income inflows (positive)
+    if income["transfer_after_tax"] != 0:
+        steps.append({"label": "Policy Transfer (after tax)", "value": income["transfer_after_tax"], "type": "inflow"})
+    if income["wage_change_after_tax"] != 0:
+        steps.append({"label": "Wage Change (after tax)", "value": income["wage_change_after_tax"], "type": "inflow" if income["wage_change_after_tax"] > 0 else "outflow"})
+    if income["employment_adjustment"] != 0:
+        steps.append({"label": "Employment Risk Adj.", "value": income["employment_adjustment"], "type": "outflow"})
+    if income["benefits_cliff_loss"] != 0:
+        steps.append({"label": "Benefits Cliff Loss", "value": income["benefits_cliff_loss"], "type": "outflow"})
+    if income["business_income_change"] != 0:
+        steps.append({"label": "Business Income Change", "value": income["business_income_change"], "type": "inflow" if income["business_income_change"] > 0 else "outflow"})
+    
+    # Cost outflows (negative)
+    for category, value in costs.items():
+        if abs(value) > 1:  # Skip negligible amounts
+            steps.append({
+                "label": category.replace("_", " ").title(),
+                "value": -abs(value),  # costs are negative
+                "type": "outflow"
+            })
+    
+    # Net result
+    steps.append({
+        "label": "NET MONTHLY IMPACT",
+        "value": net_impact_result["net_monthly"],
+        "type": "net"
+    })
+    
+    return {
+        "description": f"Monthly impact breakdown for {household_label}",
+        "policy": policy_label,
+        "household_profile": household_label,
+        "steps": steps,
+        "net_monthly": net_impact_result["net_monthly"],
+        "net_annual": net_impact_result["net_annual"],
+        "verdict": net_impact_result["verdict"],
+    }
+```
+
+**Cost:** Free (runs locally)
+
+---
+
+## Tool 4: generate_timeline_data (Internal Computation)
+
+**What it is:** Merges temporal phasing from all sector agents into
+a unified timeline showing cumulative net impact over time.
+
+```python
+def generate_timeline_data(
+    housing_temporal: list[dict],    # Housing Agent's temporal_sequence
+    consumer_temporal: list[dict],   # Consumer Agent's temporal data (if any)
+    labor_temporal: list[dict],      # Labor Agent's temporal data (if any)
+    direct_transfer_monthly: float,  # Immediate from policy
+) -> dict:
+    """Merge sector timelines into unified cumulative impact timeline."""
+    
+    horizons = [
+        {
+            "label": "Month 0-3",
+            "months": 1.5,  # midpoint
+            "income_effects": direct_transfer_monthly,  # immediate
+            "price_effects": 0,       # build from sector data
+            "housing_effects": 0,     # build from sector data
+            "labor_effects": 0,       # build from sector data
+        },
+        # ... construct for each horizon
+    ]
+    
+    # Merge sector temporal data into each horizon
+    # ...
+    
+    return {
+        "horizons": [
+            {
+                "label": h["label"],
+                "cumulative_net_monthly": {
+                    "low": h["income_effects"] - h["max_costs"],
+                    "central": h["income_effects"] - h["central_costs"],
+                    "high": h["income_effects"] - h["min_costs"],
+                },
+                "dominant_effects": [],  # populated from sector data
+                "uncertainty": "LOW" if h["months"] < 3 else "MEDIUM" if h["months"] < 12 else "HIGH",
+            }
+            for h in horizons
+        ]
+    }
+```
+
+**Cost:** Free (runs locally)
+
+---
+
+## Summary: The Synthesis Agent's Tool Profile
+
+| # | Tool | Type | External API | Cost | Purpose |
+|---|------|------|-------------|------|---------|
+| 1 | compute_net_impact | Code execution | None | Free | Calculate net household impact from resolved inputs |
+| 2 | validate_consistency | Code execution | None | Free | Detect cross-agent contradictions |
+| 3 | generate_waterfall_data | Code execution | None | Free | Structure data for waterfall chart |
+| 4 | generate_timeline_data | Code execution | None | Free | Merge sector timelines into unified view |
+
+**Total external API calls: ZERO**
+**Total API keys needed: ZERO (beyond what upstream agents already use)**
+**Total cost: $0 (plus LLM inference cost for reasoning)**
+
+The Synthesis Agent is the CHEAPEST agent to run because it does
+no external data fetching. Its cost is purely LLM inference —
+one call with all upstream outputs in context, producing the
+structured analytics payload.
+
+---
+
+## Implementation Notes
+
+### Option A: All Four Tools as Code Execution
+
+If you have a Python execution sandbox (which you do in your
+architecture), implement all four as callable tools. The LLM
+extracts the right values from upstream outputs, calls the tools
+with structured parameters, and interprets the results.
+
+**Advantages:** Arithmetic is guaranteed correct. Auditable.
+**Disadvantages:** Requires the LLM to correctly extract values
+from upstream JSON and map them to parameters.
+
+### Option B: Tools 1-4 as Orchestrator-Level Code
+
+The orchestrator (not the LLM) runs the computation tools
+programmatically after extracting values from upstream outputs.
+The LLM only does the consistency audit, narrative generation,
+and winners/losers identification.
+
+**Advantages:** No risk of LLM misinterpreting tool parameters.
+Computation is deterministic.
+**Disadvantages:** Less flexible — the orchestrator must know the
+exact structure of all upstream outputs.
+
+### Option C: Hybrid (Recommended)
+
+The orchestrator runs validate_consistency and compute_net_impact
+programmatically (these need arithmetic precision). The LLM
+handles the consistency INTERPRETATION (why do agents disagree,
+which is more trustworthy), narrative generation, and winners/
+losers identification (these need reasoning, not arithmetic).
+
+```
+Orchestrator:
+  1. Extract shared variables from all agent outputs
+  2. Call validate_consistency() → get inconsistency list
+  3. Run compute_net_impact() for each household profile
+  4. Run generate_waterfall_data() and generate_timeline_data()
+
+LLM (Synthesis Agent):
+  5. Receive: consistency report + computed impacts + raw agent outputs
+  6. Interpret inconsistencies (why, which to trust)
+  7. Identify winners and losers (reasoning about the impact matrix)
+  8. Generate narrative summary (plain language)
+  9. Assign confidence levels (judgment about uncertainty propagation)
+  10. Produce final analytics payload JSON
+```
+
+This hybrid gives you arithmetic precision where it matters and
+LLM reasoning where it matters.
+
+---
+
+## What This Agent Does NOT Have
+
+| Tool | Why Not |
+|------|---------|
+| FRED / BLS / Census | Data already gathered by upstream agents |
+| OpenAlex / Google Scholar | Evidence already gathered by upstream agents |
+| Web search | No new research needed at synthesis stage |
+| fetch_document_text | No new documents to read |
+| Any external API | This agent is purely internal |
+
+If the Synthesis Agent finds it NEEDS external data that no upstream
+agent provided, the correct response is to flag the gap in the
+output ("Consumer Agent data missing — price estimates not available")
+rather than to go gather the data itself. The pipeline's separation
+of concerns must be maintained.

@@ -17,7 +17,7 @@ class TransmissionPathway(BaseModel):
     mechanism: str = ""
     relevance: str = "NONE"
     direction: str = ""
-    confidence: str = "theoretical"
+    confidence: str = "THEORETICAL"
     notes: str = ""
 
 
@@ -150,7 +150,7 @@ class CausalClaimSimple(BaseModel):
     cause: str = ""
     effect: str = ""
     mechanism: str = ""
-    confidence: str = "theoretical"
+    confidence: str = "THEORETICAL"
     evidence: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     sensitivity: str | None = None
