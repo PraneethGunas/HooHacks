@@ -16,9 +16,23 @@ const AGENT_PROCESSES: Record<string, string[]> = {
   Housing: ["Load rent burden data", "Model housing supply links", "Estimate affordability shift", "Draft housing report"],
 };
 
-function StageLabel({ children }: { children: string }) {
+function StageLabel({
+  children,
+  status,
+}: {
+  children: string;
+  status: "pending" | "running" | "complete";
+}) {
+  const lightClass =
+    status === "complete"
+      ? "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.7)]"
+      : status === "running"
+        ? "bg-sky-400 animate-pulse shadow-[0_0_12px_rgba(56,189,248,0.85)]"
+        : "bg-amber-400/80 shadow-[0_0_8px_rgba(251,191,36,0.5)]";
+
   return (
-    <div className="text-[10px] font-medium text-white/25 tracking-widest uppercase mb-2 mt-4">
+    <div className="text-[10px] font-medium text-white/30 tracking-widest uppercase mb-2 mt-4 flex items-center gap-2">
+      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", lightClass)} />
       {children}
     </div>
   );
@@ -67,7 +81,7 @@ function AgentRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium">{name}</div>
-          <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60">{status}</span>
+          <span className="text-[10px] rounded border border-white/10 px-1.5 py-0.5 text-white/60 capitalize">{status}</span>
         </div>
         <div className="text-xs text-white/55">{description}</div>
         {toolCall && (
@@ -110,7 +124,7 @@ function SectorCard({
   return (
     <div
       className={cn(
-        "rounded-lg border border-white/10 bg-white/[0.02] p-3 enter-card",
+        "rounded-xl border border-white/10 glass-card p-3 enter-card",
         status === "complete" && "border-green-500/30",
         status === "running" && "border-amber-500/30 bg-amber-950/10",
       )}
@@ -132,7 +146,7 @@ function SectorCard({
         )}
       </div>
 
-      <div className="mt-2 h-[4px] w-full rounded bg-white/10 overflow-hidden">
+      <div className={cn("mt-2 h-[4px] w-full rounded bg-white/10 overflow-hidden progress-track", status === "running" && "progress-running")}>
         <div
           className={cn(
             "h-full rounded transition-[width] duration-500",
@@ -153,18 +167,58 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
   const elapsed = formatDuration(state.elapsedMs);
 
   const classifierSummary = state.classifier
-    ? `task_type: ${state.classifier.task_type} · scope: ${state.classifier.policy_params.jurisdiction ?? "unknown"}`
+    ? `task_type: ${state.classifier.task_type} · scope: ${state.classifier.policy_params.scope ?? "unknown"}`
     : "waiting for classifier...";
 
   const analystTool = state.analystToolCalls[state.analystToolCalls.length - 1];
   const analystToolText = analystTool ? `${analystTool.tool}("${analystTool.query}")` : undefined;
 
   const sectorAgents = Object.entries(state.sectorAgents);
+  const allSectorsComplete = sectorAgents.length > 0 && sectorAgents.every(([, data]) => data.status === "complete");
+  const anySectorRunning = sectorAgents.some(([, data]) => data.status === "running");
+
+  const stage0Status: "pending" | "running" | "complete" = state.classifier
+    ? "complete"
+    : state.status === "running"
+      ? "running"
+      : "pending";
+
+  const stage1Status: "pending" | "running" | "complete" = state.analystComplete
+    ? "complete"
+    : state.status === "running" && !!state.classifier
+      ? "running"
+      : "pending";
+
+  const stage2Status: "pending" | "running" | "complete" = allSectorsComplete
+    ? "complete"
+    : anySectorRunning
+      ? "running"
+      : "pending";
+
+  const stage3Status: "pending" | "running" | "complete" = state.challenges.length > 0
+    ? "complete"
+    : allSectorsComplete && state.status === "running"
+      ? "running"
+      : "pending";
+
+  const stage3bStatus: "pending" | "running" | "complete" =
+    state.rebuttals.length > 0 && state.rebuttals.length >= Math.max(1, state.challenges.length)
+      ? "complete"
+      : state.challenges.length > 0
+        ? "running"
+        : "pending";
+
+  const stage4Status: "pending" | "running" | "complete" = state.synthesis
+    ? "complete"
+    : state.status === "running" && state.rebuttals.length > 0
+      ? "running"
+      : "pending";
 
   return (
     <section className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 sm:py-6">
       <header className="sticky top-[56px] z-20 mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-[var(--bg-surface)]/95 px-4 py-3 backdrop-blur">
         <h1 className="text-sm tracking-tight text-white/90 truncate">{state.query || "Policy run"}</h1>
+        <span className="hidden rounded-full border border-[var(--fun-cyan)]/40 bg-[var(--fun-cyan)]/10 px-2 py-0.5 text-[10px] text-[var(--fun-cyan)] sm:inline">Workflow Replay</span>
         <span className="ml-auto inline-flex items-center gap-2 text-xs text-white/55">
           <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
           live
@@ -172,15 +226,15 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
         <span className="text-xs text-white/45">{elapsed}</span>
       </header>
 
-      <div className="rounded-xl border border-white/10 bg-[var(--bg-surface)]/80 p-4">
-        <StageLabel>Stage 0 - Classifier</StageLabel>
+      <div className="rounded-2xl border border-white/10 bg-[var(--bg-surface)]/80 p-4 shadow-[0_12px_36px_rgba(0,0,0,0.32)]">
+        <StageLabel status={stage0Status}>Stage 0 - Classifier</StageLabel>
         <AgentRow
           name="Classifier"
           status={state.classifier ? "complete" : state.status === "running" ? "running" : "pending"}
           description={classifierSummary}
         />
 
-        <StageLabel>Stage 1 - Analyst</StageLabel>
+        <StageLabel status={stage1Status}>Stage 1 - Analyst</StageLabel>
         <AgentRow
           name="Analyst agent"
           status={state.analystComplete ? "complete" : state.status === "running" ? "running" : "pending"}
@@ -196,7 +250,7 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
           <LightningRow key={`${payment.payment_hash}-${index}`} payment={payment} />
         ))}
 
-        <StageLabel>Stage 2 - Sector agents</StageLabel>
+        <StageLabel status={stage2Status}>Stage 2 - Sector agents</StageLabel>
         <div className="grid gap-2 sm:grid-cols-2">
           {sectorAgents.map(([agent, data], index) => {
             const lastTool = data.toolCalls[data.toolCalls.length - 1];
@@ -221,7 +275,7 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
           })}
         </div>
 
-        <StageLabel>Stage 3 - Debate + Revision</StageLabel>
+        <StageLabel status={stage3Status}>Stage 3 - Debate</StageLabel>
         {state.challenges.length === 0 && (
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-white/45">No challenges yet.</div>
         )}
@@ -267,7 +321,12 @@ export default function AgentFeed({ state, onViewReport }: AgentFeedProps) {
           })}
         </div>
 
-        <StageLabel>Stage 4 - Synthesis</StageLabel>
+        <StageLabel status={stage3bStatus}>Stage 3b - Agent revisions</StageLabel>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-white/65">
+          {state.rebuttals.length === 0 ? "No revisions submitted yet." : `${state.rebuttals.length} revision responses posted.`}
+        </div>
+
+        <StageLabel status={stage4Status}>Stage 4 - Synthesis</StageLabel>
         <AgentRow
           name="Synthesis agent"
           status={state.synthesis ? "complete" : state.status === "running" ? "running" : "pending"}

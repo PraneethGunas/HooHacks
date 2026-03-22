@@ -95,6 +95,15 @@ export interface SynthesisReport {
     headline_stats: Array<{ label: string; value: string; sub?: string }>;
     key_claims: CausalClaim[];
   };
+  impact_dashboard: Array<{
+    category: string;
+    direction: "increase" | "decline" | "mixed" | "distortionary";
+    magnitude: string;
+    confidence: Confidence;
+    survived_challenge: "yes" | "no" | "partial";
+    status: "works" | "doesnt_work" | "tradeoff";
+    sectors: Array<"labor" | "housing" | "consumer" | "business" | "fiscal" | "cross-sector">;
+  }>;
   sankey_data: SankeyData;
   metadata: {
     total_tool_calls: number;
